@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Language, WoundAnalysisResult, CaseRecord, PatientMode, AllergyProfile, EmergencyContact } from './types';
+import { motion, AnimatePresence } from 'motion/react';
 import { Header } from './components/Header';
 import { WoundScanner } from './components/WoundScanner';
 import { CaseHistory } from './components/CaseHistory';
@@ -360,73 +361,83 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {activeTab === 'scanner' && (
-          <WoundScanner
-            currentLang={currentLang}
-            useOfflineEngine={useOfflineEngine}
-            highContrast={highContrast}
-            patientMode={patientMode}
-            onSaveCase={handleSaveCase}
-            onOpenEmergencyModal={() => setIsEmergencyModalOpen(true)}
-            onNavigateTab={setActiveTab}
-          />
-        )}
+      <main className="max-w-7xl mx-auto px-4 py-6 relative">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+          >
+            {activeTab === 'scanner' && (
+              <WoundScanner
+                currentLang={currentLang}
+                useOfflineEngine={useOfflineEngine}
+                highContrast={highContrast}
+                patientMode={patientMode}
+                onSaveCase={handleSaveCase}
+                onOpenEmergencyModal={() => setIsEmergencyModalOpen(true)}
+                onNavigateTab={setActiveTab}
+              />
+            )}
 
-        {activeTab === 'profile' && (
-          <PatientProfileTab
-            allergies={allergies}
-            onUpdateAllergies={handleUpdateAllergies}
-            isDiabeticMode={isDiabeticMode}
-            onToggleDiabeticMode={handleToggleDiabeticMode}
-            patientMode={patientMode}
-            onTogglePatientMode={setPatientMode}
-            emergencyContacts={emergencyContacts}
-            onAddContact={handleAddContact}
-            onDeleteContact={handleDeleteContact}
-            currentLang={currentLang}
-            highContrast={highContrast}
-          />
-        )}
+            {activeTab === 'profile' && (
+              <PatientProfileTab
+                allergies={allergies}
+                onUpdateAllergies={handleUpdateAllergies}
+                isDiabeticMode={isDiabeticMode}
+                onToggleDiabeticMode={handleToggleDiabeticMode}
+                patientMode={patientMode}
+                onTogglePatientMode={setPatientMode}
+                emergencyContacts={emergencyContacts}
+                onAddContact={handleAddContact}
+                onDeleteContact={handleDeleteContact}
+                currentLang={currentLang}
+                highContrast={highContrast}
+              />
+            )}
 
-        {activeTab === 'progress' && (
-          <WoundProgressTracker
-            currentLang={currentLang}
-            highContrast={highContrast}
-            patientMode={patientMode}
-            cases={cases}
-            useOfflineEngine={useOfflineEngine}
-          />
-        )}
+            {activeTab === 'progress' && (
+              <WoundProgressTracker
+                currentLang={currentLang}
+                highContrast={highContrast}
+                patientMode={patientMode}
+                cases={cases}
+                useOfflineEngine={useOfflineEngine}
+              />
+            )}
 
-        {activeTab === 'hospitals' && (
-          <HospitalLocator
-            currentLang={currentLang}
-            highContrast={highContrast}
-          />
-        )}
+            {activeTab === 'hospitals' && (
+              <HospitalLocator
+                currentLang={currentLang}
+                highContrast={highContrast}
+              />
+            )}
 
-        {activeTab === 'history' && (
-          <CaseHistory
-            cases={cases}
-            currentLang={currentLang}
-            onDeleteCase={handleDeleteCase}
-            onClearAll={handleClearAllCases}
-            highContrast={highContrast}
-          />
-        )}
+            {activeTab === 'history' && (
+              <CaseHistory
+                cases={cases}
+                currentLang={currentLang}
+                onDeleteCase={handleDeleteCase}
+                onClearAll={handleClearAllCases}
+                highContrast={highContrast}
+              />
+            )}
 
-        {activeTab === 'architecture' && (
-          <ModelArchitectureAndMetrics highContrast={highContrast} />
-        )}
+            {activeTab === 'architecture' && (
+              <ModelArchitectureAndMetrics highContrast={highContrast} />
+            )}
 
-        {activeTab === 'deliverables' && (
-          <DeliverablesHub highContrast={highContrast} />
-        )}
+            {activeTab === 'deliverables' && (
+              <DeliverablesHub highContrast={highContrast} />
+            )}
 
-        {activeTab === 'guide' && (
-          <RuralFieldGuide currentLang={currentLang} highContrast={highContrast} />
-        )}
+            {activeTab === 'guide' && (
+              <RuralFieldGuide currentLang={currentLang} highContrast={highContrast} />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* Footer */}

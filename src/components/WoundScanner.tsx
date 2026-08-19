@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Language, WoundAnalysisResult, PatientMode, WoundMeasurement } from '../types';
+import { motion, AnimatePresence } from 'motion/react';
 import { speakText, stopSpeech } from '../utils/speech';
 import { generateWoundReportPDF } from '../utils/pdfGenerator';
 import { CaretakerSmsModal } from './CaretakerSmsModal';
@@ -282,8 +283,8 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 </button>
               </div>
             ) : selectedImage ? (
-              /* Uploaded / Selected Image Display with Photogrammetry Caliper Overlay */
-              <div className="relative w-full aspect-4/3 rounded-[20px] overflow-hidden bg-[#fdfcfb] border border-[#e2dfd5] shadow-inner">
+              /* Uploaded / Selected Image Display with Photogrammetry Caliper Overlay & Holographic Scanner */
+              <div className="relative w-full aspect-4/3 rounded-[24px] overflow-hidden bg-[#18181b] border border-[#e2dfd5] shadow-md group">
                 <img
                   src={selectedImage}
                   alt="Target Wound"
@@ -291,54 +292,81 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                   className="w-full h-full object-contain"
                 />
 
+                {/* Laser Scanline Beam when AI analysis is active */}
+                {isAnalyzing && (
+                  <div className="absolute inset-0 pointer-events-none overflow-hidden z-20">
+                    {/* Laser line sweeping */}
+                    <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-emerald-500/0 via-emerald-400 to-emerald-500/0 shadow-[0_0_18px_#34d399] animate-laser-sweep">
+                      <div className="absolute inset-x-1/4 h-[2px] bg-white opacity-80" />
+                    </div>
+                    {/* Grid overlay */}
+                    <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(52,211,153,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(52,211,153,0.06)_1px,transparent_1px)] bg-[size:24px_24px]" />
+                    
+                    {/* Center Scanning Target Reticle */}
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="w-32 h-32 rounded-full border border-emerald-400/50 border-dashed animate-reticle-spin flex items-center justify-center">
+                        <div className="w-20 h-20 rounded-full border border-emerald-300/40" />
+                      </div>
+                    </div>
+
+                    {/* HUD Corner Accents */}
+                    <div className="absolute top-4 left-4 w-6 h-6 border-t-2 border-l-2 border-emerald-400" />
+                    <div className="absolute top-4 right-4 w-6 h-6 border-t-2 border-r-2 border-emerald-400" />
+                    <div className="absolute bottom-4 left-4 w-6 h-6 border-b-2 border-l-2 border-emerald-400" />
+                    <div className="absolute bottom-4 right-4 w-6 h-6 border-b-2 border-r-2 border-emerald-400" />
+                  </div>
+                )}
+
                 {/* Status Badge */}
-                <div className="absolute top-3 left-3 px-3 py-1 bg-black/65 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Wound Image Analyzed</span>
+                <div className="absolute top-3 left-3 px-3 py-1 bg-black/75 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-md border border-white/10 z-10">
+                  <span className={`w-2 h-2 rounded-full ${isAnalyzing ? 'bg-amber-400 animate-ping' : 'bg-emerald-400 animate-pulse'}`}></span>
+                  <span>{isAnalyzing ? 'VLM Scanning Active' : 'Wound Target Loaded'}</span>
                 </div>
 
                 {/* Caliper Overlay Toggle Button */}
-                {analysisResult && (
-                  <button
+                {analysisResult && !isAnalyzing && (
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     type="button"
                     onClick={() => setShowCalipersOverlay(!showCalipersOverlay)}
-                    className="absolute top-3 right-3 px-2.5 py-1 bg-black/70 hover:bg-black/85 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition cursor-pointer shadow-xs border border-white/20"
+                    className="absolute top-3 right-3 px-3 py-1 bg-black/75 hover:bg-black/90 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition cursor-pointer shadow-md border border-white/20 z-10"
                     title="Toggle Caliper Scale Grid Overlay"
                   >
                     {showCalipersOverlay ? <EyeOff className="w-3 h-3 text-emerald-400" /> : <Eye className="w-3 h-3" />}
-                    <span>{showCalipersOverlay ? 'Hide Scale Overlay' : 'Show Scale Overlay'}</span>
-                  </button>
+                    <span>{showCalipersOverlay ? 'Hide Scale Caliper' : 'Show Scale Caliper'}</span>
+                  </motion.button>
                 )}
 
                 {/* Dynamic Caliper & Reference Marker HUD Overlay */}
-                {analysisResult && showCalipersOverlay && !analysisResult.isNoWoundDetected && (
-                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                {analysisResult && showCalipersOverlay && !analysisResult.isNoWoundDetected && !isAnalyzing && (
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
                     {/* Elliptical Measurement Boundary */}
-                    <div className="relative w-48 h-32 rounded-[50%] border-2 border-dashed border-emerald-400/90 bg-emerald-500/10 shadow-[0_0_15px_rgba(52,211,153,0.3)] flex items-center justify-center">
+                    <div className="relative w-52 h-36 rounded-[50%] border-2 border-dashed border-emerald-400 bg-emerald-500/10 shadow-[0_0_20px_rgba(52,211,153,0.35)] flex items-center justify-center">
                       {/* Horizontal Axis Caliper line */}
-                      <div className="absolute inset-x-2 h-[1px] bg-emerald-400/80 flex items-center justify-between">
-                        <div className="w-1.5 h-3 bg-emerald-400 -mt-1" />
-                        <span className="text-[10px] font-mono font-bold bg-black/80 text-emerald-300 px-1.5 py-0.5 rounded shadow">
+                      <div className="absolute inset-x-2 h-[1.5px] bg-emerald-400 flex items-center justify-between shadow-xs">
+                        <div className="w-2 h-4 bg-emerald-400 -mt-1 rounded-xs" />
+                        <span className="text-[10px] font-mono font-bold bg-black/85 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/40 shadow-md">
                           L: {customMeasurement?.lengthCm || analysisResult.measurement?.lengthCm || 3.5} cm ({customMeasurement?.lengthMm || ((analysisResult.measurement?.lengthCm || 3.5) * 10).toFixed(0)} mm)
                         </span>
-                        <div className="w-1.5 h-3 bg-emerald-400 -mt-1" />
+                        <div className="w-2 h-4 bg-emerald-400 -mt-1 rounded-xs" />
                       </div>
 
                       {/* Vertical Axis Caliper line */}
-                      <div className="absolute inset-y-2 w-[1px] bg-emerald-400/80 flex flex-col items-center justify-between">
-                        <div className="h-1.5 w-3 bg-emerald-400 -ml-1" />
-                        <span className="text-[10px] font-mono font-bold bg-black/80 text-emerald-300 px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                      <div className="absolute inset-y-2 w-[1.5px] bg-emerald-400 flex flex-col items-center justify-between shadow-xs">
+                        <div className="h-2 w-4 bg-emerald-400 -ml-1 rounded-xs" />
+                        <span className="text-[10px] font-mono font-bold bg-black/85 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/40 shadow-md whitespace-nowrap">
                           W: {customMeasurement?.widthCm || analysisResult.measurement?.widthCm || 1.8} cm ({customMeasurement?.widthMm || ((analysisResult.measurement?.widthCm || 1.8) * 10).toFixed(0)} mm)
                         </span>
-                        <div className="h-1.5 w-3 bg-emerald-400 -ml-1" />
+                        <div className="h-2 w-4 bg-emerald-400 -ml-1 rounded-xs" />
                       </div>
                     </div>
 
                     {/* Reference Marker HUD Tag (Bottom Right) */}
-                    <div className="absolute bottom-3 right-3 px-2.5 py-1 bg-black/75 backdrop-blur-md rounded-xl border border-yellow-400/60 text-yellow-300 text-[10px] font-mono flex items-center gap-1.5 shadow-md">
-                      <Coins className="w-3 h-3 text-yellow-400" />
+                    <div className="absolute bottom-3 right-3 px-3 py-1.5 bg-black/80 backdrop-blur-md rounded-xl border border-yellow-400/70 text-yellow-300 text-[10px] font-mono flex items-center gap-1.5 shadow-lg">
+                      <Coins className="w-3.5 h-3.5 text-yellow-400" />
                       <span>
-                        Ref Ratio: {customMeasurement?.pixelToMmRatio || 0.1917} mm/px ({patientMode === 'child' ? 'Pediatric' : 'Adult'})
+                        Ref: ₹5 Coin ({customMeasurement?.pixelToMmRatio || 0.1917} mm/px)
                       </span>
                     </div>
                   </div>
@@ -464,35 +492,72 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
         {/* Right Side: VLM Analysis & Multilingual Triage Card (7 cols) */}
         <div className="lg:col-span-7">
           {isAnalyzing ? (
-            /* Loading / AI Inference Animation */
-            <div className={`p-8 rounded-[28px] border min-h-[420px] flex flex-col items-center justify-center text-center ${
-              highContrast ? 'bg-black border-yellow-400' : 'bg-white border-[#e2dfd5] shadow-sm'
-            }`}>
-              <div className="relative w-16 h-16 mb-4">
-                <div className="absolute inset-0 rounded-full border-4 border-[#5A5A40]/20 border-t-[#5A5A40] animate-spin" />
-                <div className="absolute inset-2 rounded-full border-4 border-[#e2dfd5] border-b-[#5A5A40] animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
+            /* Enhanced Holographic AI Inference Animation */
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className={`p-8 rounded-[28px] border min-h-[460px] flex flex-col items-center justify-center text-center relative overflow-hidden ${
+                highContrast ? 'bg-black border-yellow-400' : 'bg-gradient-to-b from-[#fdfcf9] to-white border-[#e2dfd5] shadow-md'
+              }`}
+            >
+              {/* Pulsing Radar Ring Background Effect */}
+              <div className="absolute w-72 h-72 rounded-full border border-[#5A5A40]/10 animate-ping opacity-25 pointer-events-none" />
+              <div className="absolute w-96 h-96 rounded-full border border-[#5A5A40]/10 pointer-events-none" />
+
+              {/* Holographic Spinning Multi-Ring Reticle */}
+              <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 rounded-full border-4 border-dashed border-[#5A5A40]/30 animate-reticle-spin" />
+                <div className="absolute inset-2 rounded-full border-3 border-[#5A5A40]/40 border-t-[#5A5A40] animate-spin" />
+                <div className="absolute inset-4 rounded-full border-2 border-emerald-500/50 border-b-emerald-600 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.8s' }} />
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <Activity className="w-6 h-6 text-[#5A5A40] animate-pulse" />
+                  <Activity className="w-8 h-8 text-[#5A5A40] animate-pulse" />
                 </div>
               </div>
 
-              <h3 className="text-xl font-serif italic text-[#5A5A40] mb-2">
-                Analyzing Wound Image with VLM
+              <span className="text-[11px] font-bold uppercase tracking-widest text-[#8e8b82] mb-1">
+                Vision-Language Diagnostic Inference
+              </span>
+              <h3 className="text-2xl font-serif italic font-bold text-[#5A5A40] mb-3">
+                Scanning Wound & Calculating Triage
               </h3>
-              <p className="text-xs text-[#5A5A40] max-w-md font-mono bg-[#fdfcfb] px-4 py-2 rounded-xl border border-[#e2dfd5]">
-                {analysisProgressStep}
-              </p>
+
+              {/* Active Step Progress Pill */}
+              <div className="text-xs text-[#5A5A40] font-mono bg-white px-5 py-2.5 rounded-full border border-[#e2dfd5] shadow-xs flex items-center gap-2 max-w-md">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                <span className="truncate">{analysisProgressStep}</span>
+              </div>
+
+              {/* Stepper Checklist items */}
+              <div className="grid grid-cols-3 gap-2 mt-6 max-w-sm w-full text-[11px] font-medium text-[#8e8b82]">
+                <div className="p-2 rounded-xl bg-[#f0ede4]/60 border border-[#e2dfd5] flex flex-col items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span>Caliper Scale</span>
+                </div>
+                <div className="p-2 rounded-xl bg-[#f0ede4]/60 border border-[#e2dfd5] flex flex-col items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Tissue Bed</span>
+                </div>
+                <div className="p-2 rounded-xl bg-[#f0ede4]/60 border border-[#e2dfd5] flex flex-col items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  <span>Triage Protocol</span>
+                </div>
+              </div>
 
               <div className="mt-6 flex items-center gap-2 text-xs text-[#8e8b82]">
                 <Layers className="w-3.5 h-3.5 text-[#5A5A40]" />
-                <span>Engine: {useOfflineEngine ? 'BLIP-2 + OPT-2.7B (On-Device LoRA)' : 'Gemini 3.7 Flash VLM'}</span>
+                <span>Engine: {useOfflineEngine ? 'BLIP-2 + OPT-2.7B LoRA (Edge)' : 'Gemini 3.7 Flash VLM'}</span>
               </div>
-            </div>
+            </motion.div>
           ) : analysisResult ? (
-            /* Analysis Result Card */
-            <div className={`p-7 rounded-[28px] border space-y-6 transition-all ${
-              highContrast ? 'bg-black border-yellow-400 text-yellow-300' : 'bg-white border-[#e2dfd5] text-[#2c2c2c] shadow-sm'
-            }`}>
+            /* Analysis Result Card with Staggered Motion Animations */
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+              className={`p-7 rounded-[28px] border space-y-6 transition-all ${
+                highContrast ? 'bg-black border-yellow-400 text-yellow-300' : 'bg-white border-[#e2dfd5] text-[#2c2c2c] shadow-sm'
+              }`}
+            >
               
               {/* AI Analysis Report Title & Patient Profile Badge */}
               <div className="flex items-center justify-between">
@@ -507,8 +572,8 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                   </h2>
                 </div>
 
-                {/* FEATURE 10: Patient Profile Badge */}
-                <div className={`px-3 py-1.5 rounded-full font-bold text-xs flex items-center gap-1.5 shadow-2xs ${
+                {/* Patient Profile Badge */}
+                <div className={`px-3.5 py-1.5 rounded-full font-bold text-xs flex items-center gap-1.5 shadow-2xs ${
                   patientMode === 'child' ? 'bg-orange-600 text-white' : 'bg-[#5A5A40] text-white'
                 }`}>
                   {patientMode === 'child' ? <Baby className="w-4 h-4" /> : <User className="w-4 h-4" />}
@@ -519,7 +584,7 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
               {/* No Wound Detected Reassurance Banner */}
               {(analysisResult.isNoWoundDetected || analysisResult.woundType === 'No Wound Detected') && (
                 <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center gap-3.5 shadow-xs">
-                  <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                  <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
                   <div>
@@ -531,23 +596,46 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 </div>
               )}
 
-              {/* Header Badge & Severity Banner */}
+              {/* Header Badge & Severity Banner with SVG Circular Gauge */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 
-                {/* Type & Confidence Box */}
-                <div className="p-4 bg-[#fdfcf8] rounded-2xl border border-[#e2dfd5] flex items-center justify-between">
+                {/* Type & Circular Confidence Meter Box */}
+                <div className="p-4 bg-[#fdfcf8] rounded-2xl border border-[#e2dfd5] flex items-center justify-between shadow-2xs">
                   <div>
                     <span className="block text-[10px] uppercase text-[#8e8b82] font-bold tracking-wider">Identified Type</span>
                     <span className="text-xl font-bold text-[#2c2c2c]">{analysisResult.woundType}</span>
+                    <span className="block text-[11px] text-[#8e8b82] mt-0.5">VLM LoRA Verified</span>
                   </div>
-                  <div className="text-right">
-                    <span className="block text-[10px] uppercase text-[#8e8b82] font-bold tracking-wider">Confidence</span>
-                    <span className="text-xl font-bold text-[#5A5A40]">{analysisResult.confidenceScore}%</span>
+                  
+                  {/* Circular SVG Gauge for Confidence */}
+                  <div className="relative w-14 h-14 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                      <path
+                        className="text-[#e2dfd5]"
+                        strokeWidth="3.5"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                      <path
+                        className="text-[#5A5A40] transition-all duration-1000 ease-out"
+                        strokeDasharray={`${analysisResult.confidenceScore}, 100`}
+                        strokeWidth="3.5"
+                        strokeLinecap="round"
+                        stroke="currentColor"
+                        fill="none"
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                      />
+                    </svg>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+                      <span className="text-xs font-bold text-[#5A5A40] leading-none">{analysisResult.confidenceScore}%</span>
+                      <span className="text-[8px] text-[#8e8b82] uppercase tracking-tighter scale-90">Conf</span>
+                    </div>
                   </div>
                 </div>
 
                 {/* Severity Grade Box */}
-                <div className={`p-4 rounded-2xl border flex items-center justify-between ${
+                <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-2xs ${
                   analysisResult.severity === 'Severe'
                     ? 'bg-[#fff3f3] border-[#ffcdd2] text-[#c62828]'
                     : analysisResult.severity === 'Moderate'
@@ -557,11 +645,14 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                   <div>
                     <span className="block text-[10px] uppercase font-bold tracking-wider opacity-80">Severity Grade</span>
                     <span className="text-2xl font-serif italic font-bold">{analysisResult.severity}</span>
+                    <span className="block text-[11px] opacity-75 mt-0.5">
+                      {analysisResult.severity === 'Severe' ? 'Immediate Triage' : analysisResult.severity === 'Moderate' ? 'Clean & Dress' : 'Self-Care Safe'}
+                    </span>
                   </div>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    analysisResult.severity === 'Severe' ? 'bg-[#c62828] text-white animate-bounce' : 'bg-[#f57f17] text-white'
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-xs ${
+                    analysisResult.severity === 'Severe' ? 'bg-[#c62828] text-white animate-radar-pulse' : analysisResult.severity === 'Moderate' ? 'bg-[#f57f17] text-white' : 'bg-emerald-600 text-white'
                   }`}>
-                    <ShieldAlert className="w-5 h-5" />
+                    <ShieldAlert className="w-6 h-6" />
                   </div>
                 </div>
 
@@ -989,7 +1080,7 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 </div>
               </div>
 
-            </div>
+            </motion.div>
           ) : (
             /* Blank Prompt State before photo selected */
             <div className={`p-10 rounded-[28px] border min-h-[420px] flex flex-col items-center justify-center text-center ${

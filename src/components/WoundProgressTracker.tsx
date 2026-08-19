@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -887,7 +888,9 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
 
       {/* FEATURE: Global Average Healing Rate & Care Regimen Effectiveness Summary Card */}
       {aggregateHealingAnalytics && aggregateHealingAnalytics.activeWoundsCount > 0 && (
-        <div
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
           id="card-average-healing-rate"
           className={`p-5 rounded-3xl border shadow-sm transition space-y-4 ${
             highContrast
@@ -953,7 +956,7 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
 
             {/* Right: Aggregate Metric Numbers */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 shrink-0">
-              <div className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center min-w-[115px]">
+              <motion.div whileHover={{ scale: 1.03 }} className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center min-w-[115px]">
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8e8b82]">
                   Avg Contraction
                 </span>
@@ -964,9 +967,9 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
                   </span>
                 </div>
                 <span className="text-[10px] text-[#8e8b82] block">Area Reduction</span>
-              </div>
+              </motion.div>
 
-              <div className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center min-w-[115px]">
+              <motion.div whileHover={{ scale: 1.03 }} className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center min-w-[115px]">
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8e8b82]">
                   Daily Velocity
                 </span>
@@ -977,9 +980,9 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
                   </span>
                 </div>
                 <span className="text-[10px] text-[#8e8b82] block">cm² / day</span>
-              </div>
+              </motion.div>
 
-              <div className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center col-span-2 sm:col-span-1 min-w-[115px]">
+              <motion.div whileHover={{ scale: 1.03 }} className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center col-span-2 sm:col-span-1 min-w-[115px]">
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8e8b82]">
                   Active Wounds
                 </span>
@@ -990,7 +993,7 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
                   </span>
                 </div>
                 <span className="text-[10px] text-[#8e8b82] block">Active Tracks</span>
-              </div>
+              </motion.div>
             </div>
 
           </div>
@@ -1017,7 +1020,7 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
             ))}
           </div>
 
-        </div>
+        </motion.div>
       )}
 
       {/* Clinical Trajectory KPI Cards */}
