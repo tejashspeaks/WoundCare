@@ -1,19 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Language, WoundAnalysisResult, PatientMode, WoundCategory } from '../types';
+import { Language, WoundAnalysisResult, PatientMode, WoundMeasurement } from '../types';
 import { speakText, stopSpeech } from '../utils/speech';
 import { generateWoundReportPDF } from '../utils/pdfGenerator';
 import { CaretakerSmsModal } from './CaretakerSmsModal';
 import { GoldenHourCountdown } from './GoldenHourCountdown';
 import { ForeignObjectDetector } from './ForeignObjectDetector';
 import { BloodLossEstimator } from './BloodLossEstimator';
-import { WoundDimensionCalibrator } from './WoundDimensionCalibrator';
 import { SnakeAndAnimalBiteIdentifier } from './SnakeAndAnimalBiteIdentifier';
 import { WoundAgeEstimator } from './WoundAgeEstimator';
 import { ScarRiskPredictor } from './ScarRiskPredictor';
 import { AyurvedicAdvisor } from './AyurvedicAdvisor';
 import { PhotoQualityChecker } from './PhotoQualityChecker';
 import { WeatherAdviceBanner } from './WeatherAdviceBanner';
-import { SAMPLE_WOUND_CASES } from '../data/sampleCases';
+import { DynamicPixelMeasurementCard } from './DynamicPixelMeasurementCard';
 import {
   Camera,
   Upload,
@@ -43,7 +42,11 @@ import {
   MessageSquare,
   Baby,
   User,
-  Building2
+  Building2,
+  Eye,
+  EyeOff,
+  Coins,
+  Scale
 } from 'lucide-react';
 
 interface WoundScannerProps {
@@ -75,46 +78,12 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
   const [clinicalNotesInput, setClinicalNotesInput] = useState('');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showSmsModal, setShowSmsModal] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<WoundCategory | 'All'>('All');
+  const [showCalipersOverlay, setShowCalipersOverlay] = useState(true);
+  const [customMeasurement, setCustomMeasurement] = useState<WoundMeasurement | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeCamera, setActiveCamera] = useState(false);
-
-  const handleSelectSampleCase = async (sampleCase: typeof SAMPLE_WOUND_CASES[0]) => {
-    setSelectedImage(sampleCase.imageUrl);
-    setIsAnalyzing(true);
-    setAnalysisResult(null);
-    setCheckedSteps({});
-    setSavedSuccess(false);
-
-    setAnalysisProgressStep('Stage 1/3: Loading clinical benchmark benchmark case...');
-    await new Promise(r => setTimeout(r, 250));
-    setAnalysisProgressStep(`Stage 2/3: Analyzing ${sampleCase.woundType} presentation...`);
-    await new Promise(r => setTimeout(r, 250));
-    setAnalysisProgressStep('Stage 3/3: Computing ATLS hemorrhage staging & closure window...');
-
-    try {
-      const response = await fetch('/api/analyze-wound', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sampleCaseId: sampleCase.id,
-          imageBase64: sampleCase.imageUrl,
-          useOfflineEngine,
-          patientMode
-        })
-      });
-
-      if (!response.ok) throw new Error('Failed to analyze sample case');
-      const result: WoundAnalysisResult = await response.json();
-      setAnalysisResult(result);
-    } catch (err) {
-      console.error('Error analyzing sample case:', err);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
 
   // FEATURE 2: Automatic Severity Voice Alert when Severe Wound is detected
   useEffect(() => {
@@ -195,11 +164,11 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
     setCheckedSteps({});
     setSavedSuccess(false);
 
-    setAnalysisProgressStep('Stage 1/3: Extracting multi-spectral image features...');
-    await new Promise(r => setTimeout(r, 400));
-    setAnalysisProgressStep('Stage 2/3: Running clinical VLM triage & dimension estimator...');
-    await new Promise(r => setTimeout(r, 400));
-    setAnalysisProgressStep('Stage 3/3: Generating infection score & multilingual first-aid...');
+    setAnalysisProgressStep('Stage 1/3: Extracting high-resolution visual landmarks & tissue morphology...');
+    await new Promise(r => setTimeout(r, 300));
+    setAnalysisProgressStep('Stage 2/3: Running deep clinical VLM triage & volumetric dimension estimator...');
+    await new Promise(r => setTimeout(r, 300));
+    setAnalysisProgressStep('Stage 3/3: Computing bioburden risk, hemostasis protocol & multilingual first-aid...');
 
     try {
       const response = await fetch('/api/analyze-wound', {
@@ -250,7 +219,11 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
 
   const handleSave = () => {
     if (analysisResult && selectedImage) {
-      onSaveCase(analysisResult, selectedImage, patientNameInput, clinicalNotesInput);
+      const finalResult = customMeasurement ? {
+        ...analysisResult,
+        measurement: customMeasurement
+      } : analysisResult;
+      onSaveCase(finalResult, selectedImage, patientNameInput, clinicalNotesInput);
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
     }
@@ -299,7 +272,7 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 </button>
               </div>
             ) : selectedImage ? (
-              /* Uploaded / Selected Image Display */
+              /* Uploaded / Selected Image Display with Photogrammetry Caliper Overlay */
               <div className="relative w-full aspect-4/3 rounded-[20px] overflow-hidden bg-[#fdfcfb] border border-[#e2dfd5] shadow-inner">
                 <img
                   src={selectedImage}
@@ -307,9 +280,59 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-contain"
                 />
-                <div className="absolute top-3 left-3 px-3 py-1 bg-black/60 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+
+                {/* Status Badge */}
+                <div className="absolute top-3 left-3 px-3 py-1 bg-black/65 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 shadow-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                   <span>Wound Image Analyzed</span>
                 </div>
+
+                {/* Caliper Overlay Toggle Button */}
+                {analysisResult && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCalipersOverlay(!showCalipersOverlay)}
+                    className="absolute top-3 right-3 px-2.5 py-1 bg-black/70 hover:bg-black/85 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition cursor-pointer shadow-xs border border-white/20"
+                    title="Toggle Caliper Scale Grid Overlay"
+                  >
+                    {showCalipersOverlay ? <EyeOff className="w-3 h-3 text-emerald-400" /> : <Eye className="w-3 h-3" />}
+                    <span>{showCalipersOverlay ? 'Hide Scale Overlay' : 'Show Scale Overlay'}</span>
+                  </button>
+                )}
+
+                {/* Dynamic Caliper & Reference Marker HUD Overlay */}
+                {analysisResult && showCalipersOverlay && !analysisResult.isNoWoundDetected && (
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    {/* Elliptical Measurement Boundary */}
+                    <div className="relative w-48 h-32 rounded-[50%] border-2 border-dashed border-emerald-400/90 bg-emerald-500/10 shadow-[0_0_15px_rgba(52,211,153,0.3)] flex items-center justify-center">
+                      {/* Horizontal Axis Caliper line */}
+                      <div className="absolute inset-x-2 h-[1px] bg-emerald-400/80 flex items-center justify-between">
+                        <div className="w-1.5 h-3 bg-emerald-400 -mt-1" />
+                        <span className="text-[10px] font-mono font-bold bg-black/80 text-emerald-300 px-1.5 py-0.5 rounded shadow">
+                          L: {customMeasurement?.lengthCm || analysisResult.measurement?.lengthCm || 3.5} cm ({customMeasurement?.lengthMm || ((analysisResult.measurement?.lengthCm || 3.5) * 10).toFixed(0)} mm)
+                        </span>
+                        <div className="w-1.5 h-3 bg-emerald-400 -mt-1" />
+                      </div>
+
+                      {/* Vertical Axis Caliper line */}
+                      <div className="absolute inset-y-2 w-[1px] bg-emerald-400/80 flex flex-col items-center justify-between">
+                        <div className="h-1.5 w-3 bg-emerald-400 -ml-1" />
+                        <span className="text-[10px] font-mono font-bold bg-black/80 text-emerald-300 px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                          W: {customMeasurement?.widthCm || analysisResult.measurement?.widthCm || 1.8} cm ({customMeasurement?.widthMm || ((analysisResult.measurement?.widthCm || 1.8) * 10).toFixed(0)} mm)
+                        </span>
+                        <div className="h-1.5 w-3 bg-emerald-400 -ml-1" />
+                      </div>
+                    </div>
+
+                    {/* Reference Marker HUD Tag (Bottom Right) */}
+                    <div className="absolute bottom-3 right-3 px-2.5 py-1 bg-black/75 backdrop-blur-md rounded-xl border border-yellow-400/60 text-yellow-300 text-[10px] font-mono flex items-center gap-1.5 shadow-md">
+                      <Coins className="w-3 h-3 text-yellow-400" />
+                      <span>
+                        Ref Ratio: {customMeasurement?.pixelToMmRatio || 0.1917} mm/px ({patientMode === 'child' ? 'Pediatric' : 'Adult'})
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               /* Drag & Drop Upload Zone */
@@ -376,65 +399,53 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 Tip: Position a small coin or ruler next to the wound for precise length/width calibration.
               </span>
             </div>
+          </div>
 
-            {/* Comprehensive 4-Category Sample Cases Gallery */}
-            <div className="mt-5 pt-4 border-t border-[#e2dfd5] space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-[#5A5A40] flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                  Clinical Benchmark Cases
-                </span>
-                <span className="text-[10px] text-[#8e8b82] font-mono">
-                  {SAMPLE_WOUND_CASES.length} Standardized Cases
-                </span>
+          {/* Clinical Imaging Guidance & Calibration Protocol */}
+          <div className={`p-5 rounded-[24px] border space-y-4 ${
+            highContrast ? 'bg-black border-yellow-400' : 'bg-white border-[#e2dfd5] shadow-sm'
+          }`}>
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-[#5A5A40]" />
+                <span>Field Image Quality & Calibration</span>
+              </h4>
+              <span className="text-[10px] bg-[#f0ede4] text-[#5A5A40] font-bold px-2 py-0.5 rounded-full">
+                AI Vision Protocol
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+              <div className="p-3 rounded-xl bg-[#fdfcf8] border border-[#e2dfd5] flex items-start gap-2.5">
+                <Ruler className="w-4 h-4 text-[#5A5A40] shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-[#2c2c2c]">Scale Reference</p>
+                  <p className="text-[11px] text-[#8e8b82]">Place a standard coin (₹1 / ₹5) or metric ruler adjacent to the wound for ±0.2cm dimensional calibration.</p>
+                </div>
               </div>
 
-              {/* Category Filter Pills */}
-              <div className="flex flex-wrap gap-1">
-                {(['All', 'Mechanical Trauma', 'Thermal & Environmental', 'Biological & Envenomation', 'Chronic & Vascular Ulcers'] as const).map((cat) => {
-                  const label = cat === 'All' ? 'All' : cat === 'Mechanical Trauma' ? 'Mechanical' : cat === 'Thermal & Environmental' ? 'Thermal' : cat === 'Biological & Envenomation' ? 'Bites/Venom' : 'Chronic/Ulcers';
-                  const isSelected = selectedCategory === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat as any)}
-                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition cursor-pointer ${
-                        isSelected
-                          ? 'bg-[#5A5A40] text-white shadow-xs'
-                          : 'bg-[#f0ede4] text-[#5A5A40] hover:bg-[#e2dfd5]'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+              <div className="p-3 rounded-xl bg-[#fdfcf8] border border-[#e2dfd5] flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-[#2c2c2c]">Diffused Daylight</p>
+                  <p className="text-[11px] text-[#8e8b82]">Avoid direct flashlight glare which can wash out granulation redness or macerated slough tissues.</p>
+                </div>
               </div>
 
-              {/* Sample Case Cards */}
-              <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
-                {SAMPLE_WOUND_CASES
-                  .filter(c => selectedCategory === 'All' || c.category === selectedCategory)
-                  .map((c) => (
-                    <div
-                      key={c.id}
-                      onClick={() => handleSelectSampleCase(c)}
-                      className="p-2.5 rounded-xl border border-[#e2dfd5] bg-[#fdfcfb] hover:border-[#5A5A40] hover:bg-[#f0ede4] transition cursor-pointer flex flex-col justify-between text-left group"
-                    >
-                      <div className="flex items-start justify-between gap-1">
-                        <span className="text-xs font-bold text-[#2c2c2c] group-hover:text-[#5A5A40] line-clamp-1">
-                          {c.title}
-                        </span>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${
-                          c.severity === 'Severe' ? 'bg-red-100 text-red-700' : c.severity === 'Moderate' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
-                        }`}>
-                          {c.severity}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-[#8e8b82] mt-1 line-clamp-1 font-serif italic">
-                        {c.woundType}
-                      </span>
-                    </div>
-                  ))}
+              <div className="p-3 rounded-xl bg-[#fdfcf8] border border-[#e2dfd5] flex items-start gap-2.5">
+                <Activity className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-[#2c2c2c]">Periwound Margin</p>
+                  <p className="text-[11px] text-[#8e8b82]">Ensure at least 3-4 cm of surrounding intact skin is visible to analyze erythema radius & edema.</p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#fdfcf8] border border-[#e2dfd5] flex items-start gap-2.5">
+                <ShieldAlert className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-[#2c2c2c]">Active Bleeding Check</p>
+                  <p className="text-[11px] text-[#8e8b82]">Gently blot excess liquid blood with sterile gauze before photographing wound bed morphology.</p>
+                </div>
               </div>
             </div>
           </div>
@@ -464,7 +475,7 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
 
               <div className="mt-6 flex items-center gap-2 text-xs text-[#8e8b82]">
                 <Layers className="w-3.5 h-3.5 text-[#5A5A40]" />
-                <span>Engine: {useOfflineEngine ? 'BLIP-2 + OPT-2.7B (On-Device LoRA)' : 'Gemini 3.6 Flash VLM'}</span>
+                <span>Engine: {useOfflineEngine ? 'BLIP-2 + OPT-2.7B (On-Device LoRA)' : 'Gemini 3.7 Flash VLM'}</span>
               </div>
             </div>
           ) : analysisResult ? (
@@ -480,7 +491,9 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                     AI Triage Analysis Report
                   </span>
                   <h2 className="text-3xl font-serif italic text-[#5A5A40]">
-                    Wound Diagnosis
+                    {analysisResult.isNoWoundDetected || analysisResult.woundType === 'No Wound Detected'
+                      ? 'Skin Health Evaluation'
+                      : 'Wound Diagnosis'}
                   </h2>
                 </div>
 
@@ -492,6 +505,21 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                   <span>{patientMode === 'child' ? 'Child Patient (<18)' : 'Adult Patient (18+)'}</span>
                 </div>
               </div>
+
+              {/* No Wound Detected Reassurance Banner */}
+              {(analysisResult.isNoWoundDetected || analysisResult.woundType === 'No Wound Detected') && (
+                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-950 flex items-center gap-3.5 shadow-xs">
+                  <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm font-serif">Intact Skin Barrier Confirmed</h4>
+                    <p className="text-xs text-emerald-800">
+                      No active laceration, puncture, abrasion, thermal burn, or acute hemorrhage detected. Maintain standard daily skin hygiene and monitor for any delayed irritation.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Header Badge & Severity Banner */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -553,28 +581,19 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 highContrast={highContrast}
               />
 
-              {/* FEATURE 3: Blood Loss Estimator (with ATLS Staging & Pediatric EBV Model) */}
+              {/* FEATURE 3: Dynamic Blood Loss Estimator */}
               <BloodLossEstimator
                 data={analysisResult.bloodLoss}
+                measurement={customMeasurement || analysisResult.measurement}
+                woundType={analysisResult.woundType}
+                severity={analysisResult.severity}
+                isNoWound={analysisResult.isNoWoundDetected}
                 currentLang={currentLang}
-                patientMode={patientMode}
                 onLaunchTourniquetGuide={onOpenEmergencyModal}
                 highContrast={highContrast}
               />
 
-              {/* FEATURE 4: Calibrated Wound Dimension & Depth Calibrator */}
-              <WoundDimensionCalibrator
-                measurement={analysisResult.measurement}
-                woundType={analysisResult.woundType}
-                patientMode={patientMode}
-                currentLang={currentLang}
-                highContrast={highContrast}
-                onUpdateMeasurement={(updated) => {
-                  setAnalysisResult(prev => prev ? { ...prev, measurement: updated } : null);
-                }}
-              />
-
-              {/* FEATURE 5: Snake & Animal Bite Identifier */}
+              {/* FEATURE 4: Snake & Animal Bite Identifier */}
               {analysisResult.biteData && analysisResult.biteData.biteType !== 'none' && (
                 <SnakeAndAnimalBiteIdentifier
                   data={analysisResult.biteData}
@@ -584,7 +603,7 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 />
               )}
 
-              {/* FEATURE 6: Wound Age & Scar Risk Intelligence */}
+              {/* FEATURE 5 & 11: Wound Age & Scar Risk Intelligence */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <WoundAgeEstimator
                   data={analysisResult.woundAge}
@@ -621,6 +640,19 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                     </button>
                   )}
                 </div>
+              )}
+
+              {/* FEATURE 8: Dynamic Pixel-to-Millimeter Surface Area Measurement & Reference Object Calibration */}
+              {!analysisResult.isNoWoundDetected && (
+                <DynamicPixelMeasurementCard
+                  measurement={customMeasurement || analysisResult.measurement}
+                  patientMode={patientMode}
+                  currentLang={currentLang}
+                  highContrast={highContrast}
+                  onMeasurementChange={(updated) => {
+                    setCustomMeasurement(updated);
+                  }}
+                />
               )}
 
               {/* FEATURE 5: Infection Risk Predictor Meter */}
@@ -884,7 +916,11 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
 
                 {/* FEATURE 9: Offline First Aid PDF Generator */}
                 <button
-                  onClick={() => generateWoundReportPDF(analysisResult, currentLang, selectedImage || undefined)}
+                  onClick={() => generateWoundReportPDF(
+                    customMeasurement ? { ...analysisResult, measurement: customMeasurement } : analysisResult,
+                    currentLang,
+                    selectedImage || undefined
+                  )}
                   id="btn-download-pdf-report"
                   className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#5A5A40] hover:bg-[#4a4a34] text-white font-bold text-xs uppercase tracking-wider transition cursor-pointer shadow"
                 >

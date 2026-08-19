@@ -1,61 +1,20 @@
-export type MechanicalWoundType = 
-  | 'Abrasion' 
-  | 'Laceration' 
-  | 'Puncture' 
-  | 'Incised Wound' 
-  | 'Contusion' 
-  | 'Avulsion & Degloving' 
-  | 'Crush Injury' 
-  | 'Traumatic Amputation' 
-  | 'Ballistic / Gunshot';
-
-export type ThermalEnvironmentalWoundType = 
-  | 'Burn (1st Degree / Superficial)' 
-  | 'Burn (2nd Degree / Partial Thickness)' 
-  | 'Burn (3rd Degree / Full Thickness)' 
-  | 'Chemical Burn' 
-  | 'Electrical Burn' 
-  | 'Road Rash / Friction Burn' 
-  | 'Frostbite / Cold Thermal';
-
-export type BiologicalWoundType = 
-  | 'Bite Wound' 
-  | 'Snakebite (Envenomation)' 
-  | 'Dog Bite (Canine)' 
-  | 'Cat Scratch / Bite' 
-  | 'Human Bite' 
-  | 'Primate / Monkey Bite' 
-  | 'Insect / Arachnid Sting' 
-  | 'Marine Envenomation';
-
-export type ChronicMedicalWoundType = 
-  | 'Diabetic Foot Ulcer' 
-  | 'Venous Stasis Ulcer' 
-  | 'Arterial Ischemic Ulcer' 
-  | 'Pressure Ulcer' 
+export type PrimaryWoundType = 'No Wound Detected' | 'Healthy Intact Skin' | 'Abrasion' | 'Laceration' | 'Puncture' | 'Burn' | 'Contusion';
+export type ExtendedWoundType = 
   | 'Surgical Incision' 
-  | 'Post-Op Dehiscence' 
-  | 'Abscess / Infection';
+  | 'Diabetic Foot Ulcer' 
+  | 'Bite Wound' 
+  | 'Snakebite / Envenomation'
+  | 'Pressure Ulcer' 
+  | 'Avulsion' 
+  | 'Abscess / Infection'
+  | 'Chemical Burn'
+  | 'Electrical Burn'
+  | 'Skin Tear'
+  | 'Venous Leg Ulcer'
+  | 'Gunshot / Penetrating Trauma';
+export type WoundType = PrimaryWoundType | ExtendedWoundType | (string & {});
 
-export type WoundCategory = 
-  | 'Mechanical Trauma' 
-  | 'Thermal & Environmental' 
-  | 'Biological & Envenomation' 
-  | 'Chronic & Vascular Ulcers';
-
-export type WoundType = 
-  | MechanicalWoundType 
-  | ThermalEnvironmentalWoundType 
-  | BiologicalWoundType 
-  | ChronicMedicalWoundType 
-  | 'Abrasion' 
-  | 'Laceration' 
-  | 'Puncture' 
-  | 'Burn' 
-  | 'Contusion'
-  | (string & {});
-
-export type SeverityLevel = 'Minor' | 'Moderate' | 'Severe';
+export type SeverityLevel = 'None' | 'Minor' | 'Moderate' | 'Severe';
 export type PatientMode = 'adult' | 'child';
 
 export type Language = 'en' | 'hi' | 'ta';
@@ -88,27 +47,28 @@ export interface MedicineRecommendation {
   dosageInstructions: MultilingualText;
   safetyPrecautions: MultilingualText;
   requiresPrescription: boolean;
-  pediatricSafetyWarning?: MultilingualText;
 }
 
-export type WoundDepthGrade = 
-  | 'Superficial (Epidermal <1mm)' 
-  | 'Partial Thickness (Dermal 1-3mm)' 
-  | 'Full Thickness (Subcutaneous >3mm)' 
-  | 'Deep (Exposed Fascia / Muscle / Bone)';
+export interface ReferenceObjectCalibration {
+  objectType: 'coin_5inr' | 'coin_10inr' | 'id_card' | 'bandage_1in' | 'ruler_marker' | 'anatomical_fingernail' | 'custom';
+  objectName: string;
+  knownDimensionMm: number; // e.g. 23.0 for 5 INR coin
+  pixelDimension: number; // pixel span in image
+  pixelToMmRatio: number; // mm per pixel
+  patientModeCorrection: number; // scale multiplier for pediatric curvature vs adult
+}
 
 export interface WoundMeasurement {
   lengthCm: number;
   widthCm: number;
-  depthMm?: number;
-  depthGrade?: WoundDepthGrade;
-  surfaceAreaCm2: number;
-  perimeterCm?: number;
-  formattedText: string; // e.g. "3.5 cm x 1.8 cm (Area ~6.3 cm²)"
-  referenceCalibrated?: boolean;
-  referenceObject?: 'Coin (25mm)' | 'Credit Card (85.6mm)' | 'Medical Ruler' | 'Fingertip (~18mm)' | 'Auto-Detected';
-  goldenClosureWindowHours?: number; // e.g. 8 hours for primary closure
-  burnTbsaPercent?: number; // Total Burn Surface Area %
+  lengthMm?: number;
+  widthMm?: number;
+  areaMm2?: number;
+  areaCm2?: number;
+  perimeterMm?: number;
+  formattedText: string; // e.g. "3.5 cm x 1.8 cm (Est. Area ~4.9 cm²)"
+  pixelToMmRatio?: number;
+  calibration?: ReferenceObjectCalibration;
 }
 
 export interface RecoveryDiet {
@@ -161,20 +121,22 @@ export interface ForeignObjectData {
   firstAidSteps?: FirstAidStep[];
 }
 
-export type HemorrhageClass = 'Class I (<15%)' | 'Class II (15-30%)' | 'Class III (30-40%)' | 'Class IV (>40%)';
-export type BleedingFlowRate = 'Capillary Ooze (Slow Trickle)' | 'Venous Bleed (Steady Flow)' | 'Arterial Bleed (Pulsatile Spurting)';
+export interface ColorSegmentationData {
+  hemorrhagePercent: number; // % fresh red active blood pool
+  granulationPercent: number; // % healthy vascular red/pink tissue bed
+  sloughPercent: number; // % yellowish devitalized fibrin
+  necroticPercent: number; // % black/brown eschar
+  intactMarginPercent: number; // % epithelializing border
+}
 
 export interface BloodLossData {
   estimatedVolumeMl: number;
   category: 'Minimal (<50ml)' | 'Moderate (50-250ml)' | 'Severe (>250ml)';
-  hemorrhageClass?: HemorrhageClass;
-  bleedingFlowRate?: BleedingFlowRate;
-  percentTotalBloodVolume?: number; // e.g. 18.5%
-  patientWeightKg?: number; // Default 70kg adult or 20kg child
-  shockIndex?: number; // Heart Rate / Systolic BP
   requiresTourniquet: boolean;
   visualCueDescription?: MultilingualText;
-  pediatricSpecificAlert?: MultilingualText;
+  colorSegmentation?: ColorSegmentationData;
+  depthCategory?: 'superficial' | 'partial-thickness' | 'full-thickness' | 'deep-arterial';
+  hemorrhageRateMlMin?: number;
 }
 
 export interface BiteData {
@@ -299,6 +261,7 @@ export interface WoundAnalysisResult {
   doctorVisitUrgency: MultilingualText;
   modelEngineUsed: string;
   processingTimeMs: number;
+  isNoWoundDetected?: boolean;
   
   // Brand New Feature Analysis Extensions
   foreignObject?: ForeignObjectData;
@@ -319,7 +282,6 @@ export interface SampleWoundCase {
   id: string;
   title: string;
   woundType: WoundType;
-  category?: WoundCategory;
   severity: SeverityLevel;
   description: string;
   patientContext: string;
