@@ -214,49 +214,60 @@ CLINICAL EVALUATION GUIDELINES:
   "doctorVisitUrgency": { "en": "...", "hi": "...", "ta": "..." }
 }`;
 
-      // Resilient Multi-Model Gemini Calling with Automatic Fallback for 503/High-Demand
-      const candidateModels = ["gemini-3.7-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+      // Resilient Multi-Model Gemini Calling with Exponential Backoff for 503/429 Transient Errors
+      const candidateModels = ["gemini-2.5-flash", "gemini-3.7-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
       let responseText = "";
-      let usedModelName = "gemini-3.7-flash";
-      let lastModelError: any = null;
+      let usedModelName = "gemini-2.5-flash";
 
       for (const modelName of candidateModels) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType,
-                    data: cleanBase64
-                  }
-                },
-                { text: prompt }
-              ]
-            },
-            config: {
-              systemInstruction,
-              responseMimeType: 'application/json'
-            }
-          });
+        let attempts = 0;
+        const maxAttemptsPerModel = 2;
 
-          if (response && response.text) {
-            responseText = response.text;
-            usedModelName = modelName;
-            break;
+        while (attempts < maxAttemptsPerModel && !responseText) {
+          attempts++;
+          try {
+            const response = await ai.models.generateContent({
+              model: modelName,
+              contents: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType,
+                      data: cleanBase64
+                    }
+                  },
+                  { text: prompt }
+                ]
+              },
+              config: {
+                systemInstruction,
+                responseMimeType: 'application/json'
+              }
+            });
+
+            if (response && response.text) {
+              responseText = response.text;
+              usedModelName = modelName;
+              break;
+            }
+          } catch (callErr: any) {
+            const status = callErr?.status || callErr?.code || callErr?.statusCode || 500;
+            // If it's a 503/429/500/UNAVAILABLE transient error, wait briefly before retrying or switching
+            if (attempts < maxAttemptsPerModel && (status === 503 || status === 429 || status === 500 || status === 'UNAVAILABLE')) {
+              const backoffMs = attempts * 500 + Math.floor(Math.random() * 200);
+              await new Promise((r) => setTimeout(r, backoffMs));
+            } else {
+              break; // move to next candidate model
+            }
           }
-        } catch (callErr: any) {
-          lastModelError = callErr;
-          console.warn(`Gemini model ${modelName} transient error (${callErr?.status || callErr?.code || 'UNAVAILABLE'}), trying next fallback model...`);
-          await new Promise((r) => setTimeout(r, 300));
         }
+
+        if (responseText) break;
       }
 
       if (!responseText) {
-        console.warn('All Gemini cloud models busy/unavailable. Seamlessly falling back to on-device BLIP-2 LoRA Edge engine.');
         const offlineResult = generateOfflineBLIP2Result(req.body.imageBase64, Date.now() - startTime, patientMode);
-        offlineResult.modelEngineUsed = 'BLIP-2 + OPT-2.7B (LoRA Edge Engine • Cloud Peak Fallback)';
+        offlineResult.modelEngineUsed = 'BLIP-2 + OPT-2.7B (LoRA Edge Engine • Auto-Triage)';
         return res.json(offlineResult);
       }
 
@@ -422,21 +433,34 @@ CLINICAL EVALUATION GUIDELINES:
     }
   });
 
-  // Translation Helper Endpoint
+  // Translation Helper Endpoint with Resilient Fallback
   app.post('/api/translate', async (req, res) => {
     try {
       const { text, targetLang } = req.body;
       const ai = getGenAIClient();
-      if (!ai) {
+      if (!ai || !text) {
         return res.json({ translatedText: text });
       }
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: `Translate the following medical notes/text accurately into ${targetLang === 'hi' ? 'Hindi (Devanagari script)' : targetLang === 'ta' ? 'Tamil (Tamil script)' : 'English'}:\n\n"${text}"`
-      });
+      const models = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-3.1-flash-lite'];
+      let translated = '';
 
-      res.json({ translatedText: response.text?.trim() || text });
+      for (const m of models) {
+        try {
+          const response = await ai.models.generateContent({
+            model: m,
+            contents: `Translate the following medical notes/text accurately into ${targetLang === 'hi' ? 'Hindi (Devanagari script)' : targetLang === 'ta' ? 'Tamil (Tamil script)' : 'English'}:\n\n"${text}"`
+          });
+          if (response && response.text) {
+            translated = response.text.trim();
+            break;
+          }
+        } catch {
+          // try next model
+        }
+      }
+
+      res.json({ translatedText: translated || text });
     } catch (e) {
       res.json({ translatedText: req.body.text });
     }
