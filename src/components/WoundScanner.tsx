@@ -95,6 +95,17 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
     }
   }, [analysisResult]);
 
+  // Stop active speech when language switches or unmounts
+  useEffect(() => {
+    if (isPlayingAudio) {
+      stopSpeech();
+      setIsPlayingAudio(false);
+    }
+    return () => {
+      stopSpeech();
+    };
+  }, [currentLang]);
+
   // Handle Image Selection and Auto Trigger VLM Triage
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -195,21 +206,20 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
     }
   };
 
-  // Voice Read-Aloud Toggle / Replay
+  // Voice Read-Aloud Toggle for Triage Summary
   const handleToggleSpeech = () => {
     if (isPlayingAudio) {
       stopSpeech();
       setIsPlayingAudio(false);
     } else if (analysisResult) {
       const summaryText = analysisResult.triageSummary[currentLang] || analysisResult.triageSummary.en;
-      const firstStepText = analysisResult.firstAidSteps[0]
-        ? (analysisResult.firstAidSteps[0].text[currentLang] || analysisResult.firstAidSteps[0].text.en)
-        : '';
-
-      const fullSpeechText = `${analysisResult.woundType}. ${summaryText}. First aid step 1: ${firstStepText}`;
-
       setIsPlayingAudio(true);
-      speakText(fullSpeechText, currentLang).finally(() => setIsPlayingAudio(false));
+      speakText(
+        summaryText,
+        currentLang,
+        () => setIsPlayingAudio(true),
+        () => setIsPlayingAudio(false)
+      ).finally(() => setIsPlayingAudio(false));
     }
   };
 
@@ -700,31 +710,39 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
 
               {/* Triage Summary & Multilingual Read-Aloud Bar */}
               <div className="bg-[#fdfcf8] p-5 rounded-2xl border border-[#e2dfd5] space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#5A5A40]">
                     <HeartPulse className="w-4 h-4 text-[#c62828]" />
-                    <span>Clinical Diagnosis ({currentLang.toUpperCase()})</span>
+                    <span>Clinical Diagnosis ({currentLang === 'hi' ? 'हिन्दी' : currentLang === 'ta' ? 'தமிழ்' : 'English'})</span>
                   </div>
 
-                  {/* Audio Read-Aloud Button */}
+                  {/* Audio Read-Aloud TTS Toggle Button */}
                   <button
                     id="btn-read-aloud"
                     onClick={handleToggleSpeech}
-                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                    title={`Read triage summary aloud in ${currentLang === 'hi' ? 'Hindi' : currentLang === 'ta' ? 'Tamil' : 'English'}`}
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold transition cursor-pointer shadow-2xs ${
                       isPlayingAudio
-                        ? 'bg-[#c62828] text-white animate-pulse'
-                        : 'bg-[#f0ede4] hover:bg-[#e2dfd5] text-[#5A5A40]'
+                        ? 'bg-[#c62828] text-white ring-2 ring-red-300 animate-pulse'
+                        : 'bg-[#f0ede4] hover:bg-[#e2dfd5] text-[#5A5A40] border border-[#e2dfd5]'
                     }`}
                   >
                     {isPlayingAudio ? (
                       <>
-                        <VolumeX className="w-3.5 h-3.5" />
-                        <span>Stop Voice</span>
+                        <VolumeX className="w-3.5 h-3.5 shrink-0" />
+                        <span className="font-mono text-[11px] uppercase tracking-wider">Stop Speech</span>
+                        <span className="flex gap-0.5 items-end h-3 ml-1">
+                          <span className="w-0.5 h-2.5 bg-white animate-pulse"></span>
+                          <span className="w-0.5 h-3.5 bg-white animate-bounce"></span>
+                          <span className="w-0.5 h-1.5 bg-white animate-pulse"></span>
+                        </span>
                       </>
                     ) : (
                       <>
-                        <Volume2 className="w-3.5 h-3.5 text-[#5A5A40]" />
-                        <span>Replay Voice Alert ({currentLang.toUpperCase()})</span>
+                        <Volume2 className="w-3.5 h-3.5 text-[#5A5A40] shrink-0" />
+                        <span className="text-[11px] font-bold">
+                          {currentLang === 'hi' ? 'सारांश सुनें (TTS)' : currentLang === 'ta' ? 'சுருக்கத்தைக் கேட்க (TTS)' : 'Listen Triage (TTS)'}
+                        </span>
                       </>
                     )}
                   </button>

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CaseRecord, Language, BodyRegion } from '../types';
 import { InteractiveBodyMap, extractCaseRegion, REGIONS_META } from './InteractiveBodyMap';
+import { speakText, stopSpeech } from '../utils/speech';
 import {
   Radio,
   Search,
@@ -14,7 +15,9 @@ import {
   Activity,
   HeartPulse,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 
 interface CaseHistoryProps {
@@ -35,6 +38,37 @@ export const CaseHistory: React.FC<CaseHistoryProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [selectedRegion, setSelectedRegion] = useState<BodyRegion | 'all'>('all');
+  const [playingCaseId, setPlayingCaseId] = useState<string | null>(null);
+
+  // Stop speech when language switches or unmounts
+  useEffect(() => {
+    if (playingCaseId) {
+      stopSpeech();
+      setPlayingCaseId(null);
+    }
+    return () => {
+      stopSpeech();
+    };
+  }, [currentLang]);
+
+  const handleToggleCaseSpeech = (record: CaseRecord) => {
+    if (playingCaseId === record.id) {
+      stopSpeech();
+      setPlayingCaseId(null);
+    } else {
+      stopSpeech();
+      const summaryText = record.result.triageSummary[currentLang] || record.result.triageSummary.en;
+      setPlayingCaseId(record.id);
+      speakText(
+        summaryText,
+        currentLang,
+        () => setPlayingCaseId(record.id),
+        () => setPlayingCaseId(null)
+      ).finally(() => {
+        setPlayingCaseId((prev) => (prev === record.id ? null : prev));
+      });
+    }
+  };
 
   const filteredCases = cases.filter((item) => {
     const matchesSearch =
@@ -283,10 +317,37 @@ ${record.result.doctorVisitUrgency.en}
                   </div>
                 </div>
 
-                {/* Triage Summary excerpt */}
-                <p className="text-xs text-[#2c2c2c] line-clamp-2 bg-[#f0ede4] p-3 rounded-xl border border-[#e2dfd5]">
-                  {record.result.triageSummary[currentLang] || record.result.triageSummary.en}
-                </p>
+                {/* Triage Summary excerpt with TTS Read-Aloud Toggle */}
+                <div className="bg-[#f0ede4] p-3 rounded-xl border border-[#e2dfd5] space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-[#5A5A40]">
+                    <span>Triage Summary ({currentLang === 'hi' ? 'हिन्दी' : currentLang === 'ta' ? 'தமிழ்' : 'English'})</span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleCaseSpeech(record)}
+                      title={`Read summary aloud in ${currentLang === 'hi' ? 'Hindi' : currentLang === 'ta' ? 'Tamil' : 'English'}`}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold transition cursor-pointer ${
+                        playingCaseId === record.id
+                          ? 'bg-[#c62828] text-white animate-pulse'
+                          : 'bg-white text-[#5A5A40] border border-[#d8d5cb] hover:bg-[#e2dfd5]'
+                      }`}
+                    >
+                      {playingCaseId === record.id ? (
+                        <>
+                          <VolumeX className="w-3 h-3" />
+                          <span>Stop Voice</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3 h-3" />
+                          <span>Listen (TTS)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-xs text-[#2c2c2c] leading-relaxed">
+                    {record.result.triageSummary[currentLang] || record.result.triageSummary.en}
+                  </p>
+                </div>
 
                 {/* Record Action Buttons */}
                 <div className="flex items-center justify-between pt-2 border-t border-[#e2dfd5] text-xs">
