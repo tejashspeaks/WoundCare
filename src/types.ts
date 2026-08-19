@@ -80,13 +80,21 @@ export interface RecoveryDiet {
 
 export interface ProgressLogEntry {
   id: string;
+  woundTrackId?: string; // Identifier for grouping scans of the same wound
+  woundTitle?: string; // Descriptive title e.g. "Forearm Laceration", "Right Heel Ulcer"
+  patientName?: string;
+  woundLocation?: string; // e.g. "Left Arm", "Right Leg", "Lower Back"
   date: string; // YYYY-MM-DD timestamp
+  dayNumber?: number; // Day 1, Day 3, Day 5, etc.
   imageUrl: string;
   woundType: WoundType;
   severity: SeverityLevel;
   infectionRiskScore: number; // 0-100%
   lengthCm: number;
   widthCm: number;
+  areaCm2?: number; // Calculated or measured surface area in cm²
+  granulationPercent?: number; // 0-100% healthy healing tissue
+  painLevel?: number; // 1-10 VAS score
   comparisonStatus: 'Healing' | 'Stable' | 'Worsening';
   comparisonNotes: string;
   patientMode: PatientMode;
@@ -288,11 +296,14 @@ export interface SampleWoundCase {
   imageUrl: string;
 }
 
+export type BodyRegion = 'head' | 'neck' | 'torso' | 'left-arm' | 'right-arm' | 'left-leg' | 'right-leg' | 'hands-feet';
+
 export interface CaseRecord {
   id: string;
   timestamp: string;
   patientName?: string;
   location?: string;
+  bodyRegion?: BodyRegion;
   imageUrl: string;
   result: WoundAnalysisResult;
   notes?: string;
