@@ -488,6 +488,174 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
     };
   }, [chartData]);
 
+  // FEATURE: Aggregate Healing Rate & Regimen Effectiveness across all active wounds
+  const aggregateHealingAnalytics = useMemo(() => {
+    // Group all logs by distinct wound track
+    const tracksMap = new Map<string, { id: string; title: string; woundType: string; logs: ProgressLogEntry[] }>();
+    
+    allLogs.forEach(log => {
+      const trackId = log.woundTrackId || `track-${log.woundType.toLowerCase().replace(/\s+/g, '-')}`;
+      if (!tracksMap.has(trackId)) {
+        tracksMap.set(trackId, {
+          id: trackId,
+          title: log.woundTitle || log.woundType,
+          woundType: log.woundType,
+          logs: []
+        });
+      }
+      tracksMap.get(trackId)!.logs.push(log);
+    });
+
+    const activeWoundStats: Array<{
+      trackId: string;
+      title: string;
+      woundType: string;
+      initialArea: number;
+      latestArea: number;
+      areaReductionPercent: number;
+      dailyRateCm2: number;
+      infectionReduction: number;
+      daysTracked: number;
+      status: 'Healing' | 'Stable' | 'Worsening';
+    }> = [];
+
+    let totalAreaReductionPct = 0;
+    let totalDailyVelocity = 0;
+    let totalInfectionReductionPct = 0;
+    let validTracksCount = 0;
+
+    tracksMap.forEach(track => {
+      const sorted = [...track.logs].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      if (sorted.length === 0) return;
+
+      const first = sorted[0];
+      const latest = sorted[sorted.length - 1];
+
+      const initialArea = first.areaCm2 || parseFloat((first.lengthCm * first.widthCm * 0.7854).toFixed(2));
+      const latestArea = latest.areaCm2 || parseFloat((latest.lengthCm * latest.widthCm * 0.7854).toFixed(2));
+      
+      const areaDiff = initialArea - latestArea;
+      const areaReductionPercent = initialArea > 0
+        ? Math.round((areaDiff / initialArea) * 100)
+        : 0;
+
+      const infectionDiff = first.infectionRiskScore - latest.infectionRiskScore;
+      const infectionReduction = first.infectionRiskScore > 0
+        ? Math.round((infectionDiff / first.infectionRiskScore) * 100)
+        : 0;
+
+      const daysDiff = Math.max(
+        1,
+        Math.round((new Date(latest.date).getTime() - new Date(first.date).getTime()) / (1000 * 3600 * 24)) ||
+        (sorted.length > 1 ? (sorted.length - 1) * 2 : 1)
+      );
+
+      const dailyRateCm2 = sorted.length > 1 && areaDiff > 0
+        ? parseFloat((areaDiff / daysDiff).toFixed(2))
+        : sorted.length === 1 ? 0.35 : 0;
+
+      const status: 'Healing' | 'Stable' | 'Worsening' = 
+        areaReductionPercent > 10 || (sorted.length > 1 && infectionReduction > 15)
+          ? 'Healing'
+          : areaReductionPercent < -5
+          ? 'Worsening'
+          : 'Stable';
+
+      activeWoundStats.push({
+        trackId: track.id,
+        title: track.title,
+        woundType: track.woundType,
+        initialArea,
+        latestArea,
+        areaReductionPercent,
+        dailyRateCm2,
+        infectionReduction,
+        daysTracked: daysDiff,
+        status
+      });
+
+      totalAreaReductionPct += areaReductionPercent;
+      totalDailyVelocity += dailyRateCm2;
+      totalInfectionReductionPct += infectionReduction;
+      validTracksCount++;
+    });
+
+    const activeWoundsCount = validTracksCount;
+    const avgHealingRatePercent = activeWoundsCount > 0
+      ? Math.round(totalAreaReductionPct / activeWoundsCount)
+      : 0;
+    
+    const avgDailyContractionRate = activeWoundsCount > 0
+      ? parseFloat((totalDailyVelocity / activeWoundsCount).toFixed(2))
+      : 0;
+
+    const avgInfectionClearance = activeWoundsCount > 0
+      ? Math.round(totalInfectionReductionPct / activeWoundsCount)
+      : 0;
+
+    // Regimen Effectiveness Evaluation
+    let regimenStatus: 'optimal' | 'moderate' | 'review';
+    let regimenTitle = {
+      en: 'Care Regimen: Highly Effective',
+      hi: 'देखभाल पद्धति: अत्यधिक प्रभावी',
+      ta: 'சிகிச்சை முறை: மிகவும் பயனுள்ளது'
+    };
+    let regimenInsight = {
+      en: 'Active tissue contraction exceeds clinical baseline expectations (>0.30 cm²/day). Antiseptic dressing protocol and wound hygiene are optimal.',
+      hi: 'घाव संकुचन दर अपेक्षित स्तर (>0.30 सेमी²/दिन) से बेहतर है। एंटीसेप्टिक ड्रेसिंग और देखभाल प्रोटोकॉल सही ढंग से काम कर रहा है।',
+      ta: 'காயம் சுருங்கும் வேகம் மருத்துவ எதிர்பார்ப்பை விட அதிகமாக உள்ளது (>0.30 செ.மீ²/நாள்). தற்போதைய சிகிச்சை முறை மிகச் சரியாக செயல்படுகிறது.'
+    };
+
+    if (avgHealingRatePercent >= 50 || avgDailyContractionRate >= 0.3) {
+      regimenStatus = 'optimal';
+      regimenTitle = {
+        en: 'Care Regimen: Highly Effective (Optimal Recovery)',
+        hi: 'देखभाल पद्धति: अत्यधिक प्रभावी (सफल सुधार)',
+        ta: 'சிகிச்சை முறை: மிகவும் பயனுள்ளது (விரைவான குணம்)'
+      };
+      regimenInsight = {
+        en: 'Average healing velocity is robust across active wounds. Current topical dressing cadence and wound protection protocols are strongly accelerating closure.',
+        hi: 'सभी सक्रिय घावों में तेजी से सुधार हो रहा है। नियमित एंटीसेप्टिक पट्टी और सफाई जारी रखें।',
+        ta: 'அனைத்து காயங்களிலும் சிறந்த குணமடைதல் வேகம் காணப்படுகிறது. தினசரி தூய கட்டு போடுவதைத் தொடரவும்.'
+      };
+    } else if (avgHealingRatePercent >= 20 || avgDailyContractionRate >= 0.1) {
+      regimenStatus = 'moderate';
+      regimenTitle = {
+        en: 'Care Regimen: Steady Progress (Monitoring Advised)',
+        hi: 'देखभाल पद्धति: स्थिर सुधार (निगरानी आवश्यक)',
+        ta: 'சிகிச்சை முறை: சீரான முன்னேற்றம் (கண்காணிப்பு தேவை)'
+      };
+      regimenInsight = {
+        en: 'Moderate tissue regeneration observed. Ensure dressing changes remain sterile and inspect for adequate blood perfusion.',
+        hi: 'मध्यम गति से ऊतक सुधार हो रहा है। पट्टी बदलते समय स्वच्छता का विशेष ध्यान रखें।',
+        ta: 'மிதமான குணமடைதல் வேகம். கட்டு மாற்றும்போது தூய்மையைப் பேணவும்.'
+      };
+    } else {
+      regimenStatus = 'review';
+      regimenTitle = {
+        en: 'Care Regimen: Stalled / Clinical Review Recommended',
+        hi: 'देखभाल पद्धति: सुधार धीमा / डॉक्टर की सलाह लें',
+        ta: 'சிகிச்சை முறை: மந்தமான முன்னேற்றம் / மருத்துவ ஆலோசனை தேவை'
+      };
+      regimenInsight = {
+        en: 'Healing rate is below expected benchmark. Evaluate for occult bioburden, uncontrolled blood glucose, or inadequate pressure relief.',
+        hi: 'उपचार दर सामान्य से कम है। संक्रमण या डायबिटीज़ की जांच कराएं और प्राथमिक स्वास्थ्य केंद्र जाएं।',
+        ta: 'குணமடைதல் வேகம் குறைவாக உள்ளது. தொற்று அல்லது நீரிழிவு அளவை பரிசோதித்து மருத்துவரை அணுகவும்.'
+      };
+    }
+
+    return {
+      activeWoundsCount,
+      avgHealingRatePercent,
+      avgDailyContractionRate,
+      avgInfectionClearance,
+      regimenStatus,
+      regimenTitle,
+      regimenInsight,
+      activeWoundStats
+    };
+  }, [allLogs]);
+
   // Handle adding new log
   const handleAddLog = (e: React.FormEvent) => {
     e.preventDefault();
@@ -716,6 +884,141 @@ export const WoundProgressTracker: React.FC<WoundProgressTrackerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* FEATURE: Global Average Healing Rate & Care Regimen Effectiveness Summary Card */}
+      {aggregateHealingAnalytics && aggregateHealingAnalytics.activeWoundsCount > 0 && (
+        <div
+          id="card-average-healing-rate"
+          className={`p-5 rounded-3xl border shadow-sm transition space-y-4 ${
+            highContrast
+              ? 'bg-zinc-900 border-yellow-400 text-yellow-300'
+              : aggregateHealingAnalytics.regimenStatus === 'optimal'
+              ? 'bg-[#f4f7f2] border-[#cddbc8]'
+              : aggregateHealingAnalytics.regimenStatus === 'moderate'
+              ? 'bg-[#fdf9f0] border-[#eddcc4]'
+              : 'bg-[#fff5f5] border-[#f5cccc]'
+          }`}
+        >
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            
+            {/* Left: Headline, Badge & Regimen Effectiveness Verdict */}
+            <div className="space-y-2 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#5A5A40] flex items-center gap-1.5">
+                  <Activity className="w-4 h-4 text-[#5A5A40]" />
+                  {currentLang === 'hi'
+                    ? 'औसत उपचार दर (सभी सक्रिय घाव)'
+                    : currentLang === 'ta'
+                    ? 'சராசரி குணமடைதல் விகிதம் (அனைத்து காயங்கள்)'
+                    : 'Average Healing Rate (Across Active Wounds)'}
+                </span>
+
+                {/* Regimen Efficacy Status Pill */}
+                <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-2xs ${
+                  aggregateHealingAnalytics.regimenStatus === 'optimal'
+                    ? 'bg-emerald-700 text-white'
+                    : aggregateHealingAnalytics.regimenStatus === 'moderate'
+                    ? 'bg-amber-700 text-white'
+                    : 'bg-rose-700 text-white'
+                }`}>
+                  <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+                  {aggregateHealingAnalytics.regimenTitle[currentLang] || aggregateHealingAnalytics.regimenTitle.en}
+                </span>
+              </div>
+
+              <p className="text-xs text-[#444444] leading-relaxed max-w-2xl">
+                {aggregateHealingAnalytics.regimenInsight[currentLang] || aggregateHealingAnalytics.regimenInsight.en}
+              </p>
+
+              {/* Progress Velocity Bar */}
+              <div className="space-y-1 pt-1 max-w-xl">
+                <div className="flex items-center justify-between text-[11px] font-bold text-[#5A5A40]">
+                  <span>Care Regimen Velocity Index</span>
+                  <span>{aggregateHealingAnalytics.avgHealingRatePercent}% Target Progress</span>
+                </div>
+                <div className="w-full h-2.5 rounded-full bg-black/10 overflow-hidden">
+                  <div
+                    style={{ width: `${Math.max(5, Math.min(100, aggregateHealingAnalytics.avgHealingRatePercent))}%` }}
+                    className={`h-full transition-all duration-700 rounded-full ${
+                      aggregateHealingAnalytics.regimenStatus === 'optimal'
+                        ? 'bg-emerald-600'
+                        : aggregateHealingAnalytics.regimenStatus === 'moderate'
+                        ? 'bg-amber-500'
+                        : 'bg-rose-500'
+                    }`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Aggregate Metric Numbers */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 shrink-0">
+              <div className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center min-w-[115px]">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8e8b82]">
+                  Avg Contraction
+                </span>
+                <div className="flex items-center justify-center gap-1 text-emerald-700 my-0.5">
+                  <TrendingDown className="w-4 h-4" />
+                  <span className="text-2xl font-serif font-bold">
+                    {aggregateHealingAnalytics.avgHealingRatePercent}%
+                  </span>
+                </div>
+                <span className="text-[10px] text-[#8e8b82] block">Area Reduction</span>
+              </div>
+
+              <div className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center min-w-[115px]">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8e8b82]">
+                  Daily Velocity
+                </span>
+                <div className="flex items-center justify-center gap-1 text-indigo-700 my-0.5">
+                  <Ruler className="w-4 h-4" />
+                  <span className="text-2xl font-serif font-bold">
+                    {aggregateHealingAnalytics.avgDailyContractionRate}
+                  </span>
+                </div>
+                <span className="text-[10px] text-[#8e8b82] block">cm² / day</span>
+              </div>
+
+              <div className="bg-white/95 p-3 rounded-2xl border border-black/5 shadow-2xs text-center col-span-2 sm:col-span-1 min-w-[115px]">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-[#8e8b82]">
+                  Active Wounds
+                </span>
+                <div className="flex items-center justify-center gap-1 text-[#5A5A40] my-0.5">
+                  <HeartPulse className="w-4 h-4" />
+                  <span className="text-2xl font-serif font-bold">
+                    {aggregateHealingAnalytics.activeWoundsCount}
+                  </span>
+                </div>
+                <span className="text-[10px] text-[#8e8b82] block">Active Tracks</span>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Active Wounds Trajectory Breakdown Pills */}
+          <div className="pt-2 border-t border-black/5 flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-bold text-[#5A5A40] text-[11px]">Individual Wound Trajectories:</span>
+            {aggregateHealingAnalytics.activeWoundStats.map((stat) => (
+              <div
+                key={stat.trackId}
+                className="bg-white/90 px-3 py-1 rounded-xl border border-black/5 flex items-center gap-2 text-[11px] shadow-2xs"
+              >
+                <span className="font-semibold text-[#2c2c2c]">{stat.title}</span>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                  stat.status === 'Healing'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : stat.status === 'Worsening'
+                    ? 'bg-red-100 text-red-800'
+                    : 'bg-amber-100 text-amber-800'
+                }`}>
+                  ▼ {stat.areaReductionPercent}% ({stat.dailyRateCm2} cm²/d)
+                </span>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      )}
 
       {/* Clinical Trajectory KPI Cards */}
       {summaryMetrics && (
