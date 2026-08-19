@@ -1,17 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Language, WoundAnalysisResult, PatientMode } from '../types';
+import { Language, WoundAnalysisResult, PatientMode, WoundCategory } from '../types';
 import { speakText, stopSpeech } from '../utils/speech';
 import { generateWoundReportPDF } from '../utils/pdfGenerator';
 import { CaretakerSmsModal } from './CaretakerSmsModal';
 import { GoldenHourCountdown } from './GoldenHourCountdown';
 import { ForeignObjectDetector } from './ForeignObjectDetector';
 import { BloodLossEstimator } from './BloodLossEstimator';
+import { WoundDimensionCalibrator } from './WoundDimensionCalibrator';
 import { SnakeAndAnimalBiteIdentifier } from './SnakeAndAnimalBiteIdentifier';
 import { WoundAgeEstimator } from './WoundAgeEstimator';
 import { ScarRiskPredictor } from './ScarRiskPredictor';
 import { AyurvedicAdvisor } from './AyurvedicAdvisor';
 import { PhotoQualityChecker } from './PhotoQualityChecker';
 import { WeatherAdviceBanner } from './WeatherAdviceBanner';
+import { SAMPLE_WOUND_CASES } from '../data/sampleCases';
 import {
   Camera,
   Upload,
@@ -73,10 +75,46 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
   const [clinicalNotesInput, setClinicalNotesInput] = useState('');
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showSmsModal, setShowSmsModal] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<WoundCategory | 'All'>('All');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeCamera, setActiveCamera] = useState(false);
+
+  const handleSelectSampleCase = async (sampleCase: typeof SAMPLE_WOUND_CASES[0]) => {
+    setSelectedImage(sampleCase.imageUrl);
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+    setCheckedSteps({});
+    setSavedSuccess(false);
+
+    setAnalysisProgressStep('Stage 1/3: Loading clinical benchmark benchmark case...');
+    await new Promise(r => setTimeout(r, 250));
+    setAnalysisProgressStep(`Stage 2/3: Analyzing ${sampleCase.woundType} presentation...`);
+    await new Promise(r => setTimeout(r, 250));
+    setAnalysisProgressStep('Stage 3/3: Computing ATLS hemorrhage staging & closure window...');
+
+    try {
+      const response = await fetch('/api/analyze-wound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sampleCaseId: sampleCase.id,
+          imageBase64: sampleCase.imageUrl,
+          useOfflineEngine,
+          patientMode
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to analyze sample case');
+      const result: WoundAnalysisResult = await response.json();
+      setAnalysisResult(result);
+    } catch (err) {
+      console.error('Error analyzing sample case:', err);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   // FEATURE 2: Automatic Severity Voice Alert when Severe Wound is detected
   useEffect(() => {
@@ -338,6 +376,67 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 Tip: Position a small coin or ruler next to the wound for precise length/width calibration.
               </span>
             </div>
+
+            {/* Comprehensive 4-Category Sample Cases Gallery */}
+            <div className="mt-5 pt-4 border-t border-[#e2dfd5] space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#5A5A40] flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                  Clinical Benchmark Cases
+                </span>
+                <span className="text-[10px] text-[#8e8b82] font-mono">
+                  {SAMPLE_WOUND_CASES.length} Standardized Cases
+                </span>
+              </div>
+
+              {/* Category Filter Pills */}
+              <div className="flex flex-wrap gap-1">
+                {(['All', 'Mechanical Trauma', 'Thermal & Environmental', 'Biological & Envenomation', 'Chronic & Vascular Ulcers'] as const).map((cat) => {
+                  const label = cat === 'All' ? 'All' : cat === 'Mechanical Trauma' ? 'Mechanical' : cat === 'Thermal & Environmental' ? 'Thermal' : cat === 'Biological & Envenomation' ? 'Bites/Venom' : 'Chronic/Ulcers';
+                  const isSelected = selectedCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat as any)}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#5A5A40] text-white shadow-xs'
+                          : 'bg-[#f0ede4] text-[#5A5A40] hover:bg-[#e2dfd5]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Sample Case Cards */}
+              <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                {SAMPLE_WOUND_CASES
+                  .filter(c => selectedCategory === 'All' || c.category === selectedCategory)
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      onClick={() => handleSelectSampleCase(c)}
+                      className="p-2.5 rounded-xl border border-[#e2dfd5] bg-[#fdfcfb] hover:border-[#5A5A40] hover:bg-[#f0ede4] transition cursor-pointer flex flex-col justify-between text-left group"
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <span className="text-xs font-bold text-[#2c2c2c] group-hover:text-[#5A5A40] line-clamp-1">
+                          {c.title}
+                        </span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${
+                          c.severity === 'Severe' ? 'bg-red-100 text-red-700' : c.severity === 'Moderate' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
+                        }`}>
+                          {c.severity}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-[#8e8b82] mt-1 line-clamp-1 font-serif italic">
+                        {c.woundType}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -454,15 +553,28 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 highContrast={highContrast}
               />
 
-              {/* FEATURE 3: Blood Loss Estimator */}
+              {/* FEATURE 3: Blood Loss Estimator (with ATLS Staging & Pediatric EBV Model) */}
               <BloodLossEstimator
                 data={analysisResult.bloodLoss}
                 currentLang={currentLang}
+                patientMode={patientMode}
                 onLaunchTourniquetGuide={onOpenEmergencyModal}
                 highContrast={highContrast}
               />
 
-              {/* FEATURE 4: Snake & Animal Bite Identifier */}
+              {/* FEATURE 4: Calibrated Wound Dimension & Depth Calibrator */}
+              <WoundDimensionCalibrator
+                measurement={analysisResult.measurement}
+                woundType={analysisResult.woundType}
+                patientMode={patientMode}
+                currentLang={currentLang}
+                highContrast={highContrast}
+                onUpdateMeasurement={(updated) => {
+                  setAnalysisResult(prev => prev ? { ...prev, measurement: updated } : null);
+                }}
+              />
+
+              {/* FEATURE 5: Snake & Animal Bite Identifier */}
               {analysisResult.biteData && analysisResult.biteData.biteType !== 'none' && (
                 <SnakeAndAnimalBiteIdentifier
                   data={analysisResult.biteData}
@@ -472,7 +584,7 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                 />
               )}
 
-              {/* FEATURE 5 & 11: Wound Age & Scar Risk Intelligence */}
+              {/* FEATURE 6: Wound Age & Scar Risk Intelligence */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <WoundAgeEstimator
                   data={analysisResult.woundAge}
@@ -510,26 +622,6 @@ export const WoundScanner: React.FC<WoundScannerProps> = ({
                   )}
                 </div>
               )}
-
-              {/* FEATURE 4: Wound Measurement Estimator Box */}
-              <div className="p-4 rounded-2xl bg-[#f5f7f2] border border-[#d8e0d0] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#5A5A40] text-white flex items-center justify-center shrink-0">
-                    <Ruler className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-[#8e8b82] tracking-wider block">
-                      AI Wound Measurement Estimator
-                    </span>
-                    <span className="text-base font-bold font-serif text-[#2c2c2c]">
-                      {analysisResult.measurement?.formattedText || `${analysisResult.measurement?.lengthCm || 3.5} cm x ${analysisResult.measurement?.widthCm || 1.8} cm`}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-right text-[11px] text-[#8e8b82] bg-white px-3 py-1.5 rounded-xl border border-[#e2dfd5]">
-                  <span>📏 Reference Object: Coin / Standard Scale Calibrated</span>
-                </div>
-              </div>
 
               {/* FEATURE 5: Infection Risk Predictor Meter */}
               <div className="p-4 rounded-2xl bg-[#fdfcf8] border border-[#e2dfd5] space-y-2">

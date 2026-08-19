@@ -2,8 +2,16 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI, Type } from '@google/genai';
-import { WoundAnalysisResult, WoundType, SeverityLevel, FirstAidStep } from './src/types.js';
+import { GoogleGenAI } from '@google/genai';
+import { 
+  WoundAnalysisResult, 
+  WoundType, 
+  SeverityLevel, 
+  FirstAidStep, 
+  WoundDepthGrade,
+  HemorrhageClass,
+  BleedingFlowRate
+} from './src/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,42 +77,60 @@ async function startServer() {
         cleanBase64 = parts[1] || parts[0];
       }
 
-      const systemInstruction = `You are WoundCare-VLM, an advanced clinical vision-language model fine-tuned for emergency medical triage, rural healthcare, and acute/chronic wound classification.
-Your task is to analyze the provided wound image and autonomously identify the exact wound type, severity, infection risk score (0-100%), wound dimensions (length and width in cm), tetanus risk, recovery diet, and localized first-aid protocol.
+      const systemInstruction = `You are WoundCare-VLM, an advanced clinical vision-language AI model fine-tuned for emergency trauma triage, acute wound classification, and rural first-aid decision support.
+Your task is to analyze the wound image and identify the exact wound type across all 4 major clinical categories:
 
-Patient Profile Mode: ${isChildMode ? 'CHILD / PEDIATRIC (<18 Years Old)' : 'ADULT (18+ Years Old)'}
-${isChildMode ? 'IMPORTANT: Adjust all first-aid steps for gentle pediatric care. Adjust any medicine references to child-safe pediatric formulas (syrup/drops/mild OTC). Flag wounds requiring pediatric emergency care.' : ''}
+1. MECHANICAL TRAUMA: Abrasion, Laceration, Puncture, Incised Wound, Contusion, Avulsion & Degloving, Crush Injury, Traumatic Amputation, Ballistic / Gunshot.
+2. THERMAL & ENVIRONMENTAL: Burn (1st Degree / Superficial), Burn (2nd Degree / Partial Thickness), Burn (3rd Degree / Full Thickness), Chemical Burn, Electrical Burn, Road Rash / Friction Burn, Frostbite / Cold Thermal.
+3. BIOLOGICAL & BITES / ENVENOMATION: Snakebite (Envenomation), Dog Bite (Canine), Cat Scratch / Bite, Human Bite, Primate / Monkey Bite, Insect / Arachnid Sting, Marine Envenomation.
+4. CHRONIC, VASCULAR & METABOLIC: Diabetic Foot Ulcer, Venous Stasis Ulcer, Arterial Ischemic Ulcer, Pressure Ulcer, Surgical Incision, Post-Op Dehiscence, Abscess / Infection.
 
-You MUST dynamically determine and specify the exact wound type based on visual clinical presentation. Common categories include:
-- Abrasion, Laceration, Puncture, Burn, Contusion, Surgical Incision, Diabetic Foot Ulcer, Bite Wound, Pressure Ulcer, Avulsion, Abscess / Skin Infection, Snakebite / Envenomation mark, or any specific wound type.
+Patient Profile: ${isChildMode ? 'CHILD / PEDIATRIC (<18 Years Old)' : 'ADULT (18+ Years Old)'}
+${isChildMode ? `CRITICAL PEDIATRIC PROTOCOLS:
+- Estimated Blood Volume is 80 mL/kg. Even small blood loss (e.g. 100-150 mL) represents rapid life-threatening hypovolemic shock.
+- STRICT CONTRAINDICATION: Do NOT recommend Aspirin (risk of fatal Reye's Syndrome). Recommend weight-based Pediatric Paracetamol oral suspension (15 mg/kg) or Ibuprofen suspension (10 mg/kg).
+- STRICT CONTRAINDICATION: Avoid concentrated Povidone-Iodine in neonates and infants <2 years due to thyroid suppression. Use sterile normal saline or chlorhexidine 0.05% aqueous.
+- Flag high-risk pediatric red flags (stridor, grunting, capillary refill >2 sec, lethargy).` : `ADULT PROTOCOL:
+- Standard ATLS hemorrhagic shock staging (Class I <15%, Class II 15-30%, Class III 30-40%, Class IV >40%).`}
 
-Assign Severity: Minor | Moderate | Severe
-Infection Risk: Low | Moderate | High | Critical
-Infection Risk Score: 0 to 100 percentage integer.
-Tetanus Risk: true if Puncture, deep Laceration, Bite Wound, or contaminated soil/rust exposure; false otherwise.
+Measurement & Sizing Guidelines:
+- Estimate wound lengthCm, widthCm, and depthMm accurately based on visual features.
+- Assign depthGrade: "Superficial (Epidermal <1mm)" | "Partial Thickness (Dermal 1-3mm)" | "Full Thickness (Subcutaneous >3mm)" | "Deep (Exposed Fascia / Muscle / Bone)".
+- Calculate surfaceAreaCm2 = lengthCm * widthCm.
+- Determine primary surgical closure golden window (e.g., 6-12 hours for clean cuts, 0 hours for abrasions).
+- If burn, estimate burnTbsaPercent.
 
-Provide Recovery Diet Advisory in English, Hindi, and Tamil:
-- foodsToEat: array of MultilingualText objects
-- foodsToAvoid: array of MultilingualText objects
-- hydrationAdvice: MultilingualText object
-- restAdvice: MultilingualText object
+Provide accurate multilingual explanations (en, hi, ta) for all text fields. Output strict JSON matching the schema.`;
 
-Output strict JSON structure matching the schema.`;
-
-      const prompt = `Analyze this wound image accurately. Self-identify the exact wound type based on visual features. Output strict JSON with the following structure:
+      const prompt = `Analyze this wound image thoroughly. Provide a complete, highly accurate clinical triage assessment. Output strict JSON with the following structure:
 {
   "woundType": "Exact wound type identified",
   "severity": "Minor" | "Moderate" | "Severe",
-  "confidenceScore": 94,
+  "confidenceScore": 95,
   "affectedAreaEstimate": "approx 3.5cm x 1.8cm",
   "measurement": {
     "lengthCm": 3.5,
     "widthCm": 1.8,
-    "formattedText": "3.5 cm x 1.8 cm (Est. Area ~6.3 cm²)"
+    "depthMm": 2.0,
+    "depthGrade": "Partial Thickness (Dermal 1-3mm)",
+    "surfaceAreaCm2": 6.3,
+    "perimeterCm": 10.6,
+    "formattedText": "3.5 cm x 1.8 cm (Area ~6.3 cm²)",
+    "goldenClosureWindowHours": 12,
+    "burnTbsaPercent": 0
+  },
+  "bloodLoss": {
+    "estimatedVolumeMl": 45,
+    "category": "Minimal (<50ml)" | "Moderate (50-250ml)" | "Severe (>250ml)",
+    "hemorrhageClass": "Class I (<15%)" | "Class II (15-30%)" | "Class III (30-40%)" | "Class IV (>40%)",
+    "bleedingFlowRate": "Capillary Ooze (Slow Trickle)" | "Venous Bleed (Steady Flow)" | "Arterial Bleed (Pulsatile Spurting)",
+    "percentTotalBloodVolume": 1.2,
+    "requiresTourniquet": false,
+    "shockIndex": 0.65
   },
   "infectionRisk": "Low" | "Moderate" | "High" | "Critical",
-  "infectionRiskScore": 28,
-  "infectionVisualCues": ["Skin Erythema", "Mild Edema", "Intact Margins"],
+  "infectionRiskScore": 25,
+  "infectionVisualCues": ["Erythematous Margin", "Mild Local Edema"],
   "tetanusRiskDetected": true/false,
   "woundTypeDescription": { "en": "...", "hi": "...", "ta": "..." },
   "triageSummary": { "en": "...", "hi": "...", "ta": "..." },
@@ -130,27 +156,27 @@ Output strict JSON structure matching the schema.`;
       "category": "Topical Antiseptic",
       "harmLevel": "Very Low (Safe OTC)",
       "estimatedPriceINR": "₹35 - ₹65",
-      "purpose": { "en": "Prevents infection", "hi": "संक्रमण रोकता है", "ta": "தொற்றைத் தடுக்கிறது" },
-      "dosageInstructions": { "en": "Apply thin layer twice daily", "hi": "दिन में 2 बार लगाएं", "ta": "நாளுக்கு 2 முறை தடவவும்" },
-      "safetyPrecautions": { "en": "External use only", "hi": "केवल बाहरी उपयोग", "ta": "வெளிப்புற பயன்பாட்டிற்கு மட்டும்" },
-      "requiresPrescription": false
+      "purpose": { "en": "...", "hi": "...", "ta": "..." },
+      "dosageInstructions": { "en": "...", "hi": "...", "ta": "..." },
+      "safetyPrecautions": { "en": "...", "hi": "...", "ta": "..." },
+      "requiresPrescription": false,
+      "pediatricSafetyWarning": { "en": "...", "hi": "...", "ta": "..." }
     }
   ],
   "recoveryDiet": {
     "foodsToEat": [
-      { "en": "Protein-rich eggs/pulses for tissue repair", "hi": "प्रोटीन युक्त दालें और अंडे", "ta": "புரதம் நிறைந்த பருப்பு மற்றும் முட்டை" },
-      { "en": "Citrus fruits & Amla for Vitamin C & collagen", "hi": "विटामिन सी युक्त आंवला व नींबू", "ta": "விட்டமின் சி நிறைந்த நெல்லிக்காய்" }
+      { "en": "...", "hi": "...", "ta": "..." }
     ],
     "foodsToAvoid": [
-      { "en": "Processed sugary foods & unboiled raw water", "hi": "अत्यधिक चीनी व बिना उबला पानी", "ta": "அதிக சர்க்கரை மற்றும் காய்ச்சாத நீர்" }
+      { "en": "...", "hi": "...", "ta": "..." }
     ],
-    "hydrationAdvice": { "en": "Drink 2.5 - 3 Liters of clean boiled water daily", "hi": "रोजाना 2.5 - 3 लीटर साफ उबला पानी पीएं", "ta": "தினமும் 2.5 - 3 லிட்டர் காய்ச்சிய நீர் குடிக்கவும்" },
-    "restAdvice": { "en": "Elevate affected limb and allow 8 hours of sleep", "hi": "घाव वाले अंग को ऊंचा रखें और 8 घंटे सोएं", "ta": "காயமடைந்த உறுப்பை உயர்த்தி வைத்து ஓய்வெடுக்கவும்" }
+    "hydrationAdvice": { "en": "...", "hi": "...", "ta": "..." },
+    "restAdvice": { "en": "...", "hi": "...", "ta": "..." }
   },
   "pediatricNotes": {
-    "en": "Child Care: Clean gently without scrubbing. Use child-safe pediatric syrup for pain if prescribed.",
-    "hi": "बाल देखभाल: घाव को रगड़ें नहीं, हल्के से धोएं।",
-    "ta": "குழந்தை பராமரிப்பு: மெதுவாக கழுவவும்."
+    "en": "...",
+    "hi": "...",
+    "ta": "..."
   },
   "doctorVisitUrgency": { "en": "...", "hi": "...", "ta": "..." }
 }`;
@@ -192,6 +218,9 @@ Output strict JSON structure matching the schema.`;
 
       const lengthCm = parsedJSON.measurement?.lengthCm || 3.2;
       const widthCm = parsedJSON.measurement?.widthCm || 1.6;
+      const depthMm = parsedJSON.measurement?.depthMm || 2.0;
+      const surfaceAreaCm2 = parseFloat((lengthCm * widthCm).toFixed(2));
+      const perimeterCm = parseFloat((2 * (lengthCm + widthCm)).toFixed(1));
 
       const finalResult: WoundAnalysisResult = {
         id: 'scan-' + Date.now(),
@@ -208,12 +237,27 @@ Output strict JSON structure matching the schema.`;
         measurement: {
           lengthCm,
           widthCm,
-          formattedText: parsedJSON.measurement?.formattedText || `${lengthCm} cm x ${widthCm} cm (Est. Area ~${(lengthCm * widthCm).toFixed(1)} cm²)`
+          depthMm,
+          depthGrade: parsedJSON.measurement?.depthGrade || (depthMm < 1 ? 'Superficial (Epidermal <1mm)' : depthMm > 3 ? 'Full Thickness (Subcutaneous >3mm)' : 'Partial Thickness (Dermal 1-3mm)'),
+          surfaceAreaCm2,
+          perimeterCm,
+          formattedText: parsedJSON.measurement?.formattedText || `${lengthCm} cm x ${widthCm} cm (Area ~${surfaceAreaCm2} cm²)`,
+          goldenClosureWindowHours: parsedJSON.measurement?.goldenClosureWindowHours ?? 12,
+          burnTbsaPercent: parsedJSON.measurement?.burnTbsaPercent
+        },
+        bloodLoss: parsedJSON.bloodLoss || {
+          estimatedVolumeMl: parsedJSON.severity === 'Severe' ? 260 : 40,
+          category: parsedJSON.severity === 'Severe' ? 'Severe (>250ml)' : 'Minimal (<50ml)',
+          hemorrhageClass: parsedJSON.severity === 'Severe' ? 'Class II (15-30%)' : 'Class I (<15%)',
+          bleedingFlowRate: parsedJSON.severity === 'Severe' ? 'Venous Bleed (Steady Flow)' : 'Capillary Ooze (Slow Trickle)',
+          percentTotalBloodVolume: isChildMode ? 15.0 : 4.5,
+          requiresTourniquet: parsedJSON.severity === 'Severe',
+          shockIndex: 0.7
         },
         infectionRisk: parsedJSON.infectionRisk || (parsedJSON.severity === 'Severe' ? 'High' : 'Moderate'),
         infectionRiskScore: parsedJSON.infectionRiskScore ?? (parsedJSON.severity === 'Severe' ? 78 : parsedJSON.severity === 'Moderate' ? 42 : 18),
         infectionVisualCues: parsedJSON.infectionVisualCues || ['Local Erythema', 'Tissue Swelling', 'Skin Disruption'],
-        tetanusRiskDetected: parsedJSON.tetanusRiskDetected ?? (['Puncture', 'Laceration', 'Bite Wound'].includes(parsedJSON.woundType) || parsedJSON.severity === 'Severe'),
+        tetanusRiskDetected: parsedJSON.tetanusRiskDetected ?? (['Puncture', 'Laceration', 'Bite Wound', 'Dog Bite (Canine)', 'Snakebite (Envenomation)', 'Avulsion & Degloving'].some(t => String(parsedJSON.woundType).includes(t)) || parsedJSON.severity === 'Severe'),
         triageSummary: parsedJSON.triageSummary || {
           en: 'Requires clean irrigation and sterile dressing.',
           hi: 'घाव को साफ पानी से धोएं और पट्टी बांधें।',
@@ -236,9 +280,9 @@ Output strict JSON structure matching the schema.`;
           restAdvice: { en: 'Elevate wound site and get 8 hours rest', hi: 'घाव को ऊंचा रखें और विश्राम करें', ta: 'காயமடைந்த பகுதியை உயர்த்தி வைத்து ஓய்வெடுக்கவும்' }
         },
         pediatricNotes: isChildMode ? (parsedJSON.pediatricNotes || {
-          en: 'Child Pediatric Mode: Clean wound gently without force. Use child-safe pediatric suspension for pain.',
-          hi: 'बाल रोगी: घाव को धीरे से धोएं और बच्चों की दवा ही दें।',
-          ta: 'குழந்தை நோயாளி: மென்மையாகக் கழுவவும்.'
+          en: 'Child Pediatric Care: Wash gently with sterile saline or boiled cooled water. Do NOT use Aspirin or adult oral tablets. Use pediatric paracetamol suspension if prescribed.',
+          hi: 'बाल रोगी: घाव को धीरे से धोएं। एस्पिरिन बिल्कुल न दें। बाल रोग विशेषज्ञ की सलाह से सिरप दें।',
+          ta: 'குழந்தை பராமரிப்பு: மென்மையாகக் கழுவவும். ஆஸ்பிரின் மருந்தை கொடுக்க வேண்டாம்.'
         }) : undefined,
         isChildMode,
         doctorVisitUrgency: parsedJSON.doctorVisitUrgency || {
@@ -246,7 +290,7 @@ Output strict JSON structure matching the schema.`;
           hi: '24 घंटे के भीतर प्राथमिक स्वास्थ्य केंद्र जाएं।',
           ta: '24 மணி நேரத்திற்குள் ஆரம்ப சுகாதார நிலையத்திற்கு செல்லவும்.'
         },
-        modelEngineUsed: 'Gemini 3.6 Flash VLM (Cloud Multi-Modal)',
+        modelEngineUsed: 'Gemini 3.6 Flash VLM (Multi-Modal Vision Engine)',
         processingTimeMs
       };
 
@@ -359,187 +403,130 @@ function generateOfflineBLIP2Result(sampleCaseId?: string, baseLatency = 320, pa
   if (caseId.includes('abrasion')) {
     woundType = 'Abrasion';
     severity = 'Minor';
+  } else if (caseId.includes('laceration')) {
+    woundType = 'Laceration';
+    severity = 'Moderate';
   } else if (caseId.includes('puncture')) {
     woundType = 'Puncture';
     severity = 'Severe';
-  } else if (caseId.includes('burn')) {
-    woundType = 'Burn';
-    severity = 'Moderate';
-  } else if (caseId.includes('contusion')) {
-    woundType = 'Contusion';
+  } else if (caseId.includes('incised')) {
+    woundType = 'Incised Wound';
     severity = 'Minor';
-  } else if (caseId.includes('surgical')) {
-    woundType = 'Surgical Incision';
+  } else if (caseId.includes('avulsion')) {
+    woundType = 'Avulsion & Degloving';
+    severity = 'Severe';
+  } else if (caseId.includes('crush')) {
+    woundType = 'Crush Injury';
+    severity = 'Severe';
+  } else if (caseId.includes('amputation')) {
+    woundType = 'Traumatic Amputation';
+    severity = 'Severe';
+  } else if (caseId.includes('burn')) {
+    woundType = 'Burn (2nd Degree / Partial Thickness)';
     severity = 'Moderate';
+  } else if (caseId.includes('chemical')) {
+    woundType = 'Chemical Burn';
+    severity = 'Severe';
+  } else if (caseId.includes('roadrash')) {
+    woundType = 'Road Rash / Friction Burn';
+    severity = 'Minor';
+  } else if (caseId.includes('frostbite')) {
+    woundType = 'Frostbite / Cold Thermal';
+    severity = 'Moderate';
+  } else if (caseId.includes('snakebite')) {
+    woundType = 'Snakebite (Envenomation)';
+    severity = 'Severe';
+  } else if (caseId.includes('bite') || caseId.includes('dog')) {
+    woundType = 'Dog Bite (Canine)';
+    severity = 'Severe';
+  } else if (caseId.includes('humanbite')) {
+    woundType = 'Human Bite';
+    severity = 'Severe';
   } else if (caseId.includes('diabetic')) {
     woundType = 'Diabetic Foot Ulcer';
     severity = 'Severe';
-  } else if (caseId.includes('bite')) {
-    woundType = 'Bite Wound';
-    severity = 'Severe';
+  } else if (caseId.includes('venous')) {
+    woundType = 'Venous Stasis Ulcer';
+    severity = 'Moderate';
   } else if (caseId.includes('pressure')) {
     woundType = 'Pressure Ulcer';
     severity = 'Severe';
+  } else if (caseId.includes('abscess')) {
+    woundType = 'Abscess / Infection';
+    severity = 'Moderate';
   }
 
-  const stepsMap: Record<string, FirstAidStep[]> = {
-    'Surgical Incision': [
+  const lengthCm = severity === 'Severe' ? 5.2 : severity === 'Moderate' ? 3.4 : 1.8;
+  const widthCm = severity === 'Severe' ? 2.8 : severity === 'Moderate' ? 1.6 : 0.9;
+  const depthMm = severity === 'Severe' ? 4.5 : severity === 'Moderate' ? 2.0 : 0.5;
+  const surfaceAreaCm2 = parseFloat((lengthCm * widthCm).toFixed(2));
+  const perimeterCm = parseFloat((2 * (lengthCm + widthCm)).toFixed(1));
+
+  let depthGrade: WoundDepthGrade = 'Partial Thickness (Dermal 1-3mm)';
+  if (depthMm < 1) depthGrade = 'Superficial (Epidermal <1mm)';
+  else if (depthMm > 3) depthGrade = 'Full Thickness (Subcutaneous >3mm)';
+
+  const estimatedVolumeMl = severity === 'Severe' ? 280 : severity === 'Moderate' ? 65 : 20;
+  const patientWeightKg = isChildMode ? 18 : 70;
+  const totalEbv = isChildMode ? patientWeightKg * 80 : patientWeightKg * 70;
+  const percentLoss = parseFloat(((estimatedVolumeMl / totalEbv) * 100).toFixed(1));
+
+  let hemorrhageClass: HemorrhageClass = 'Class I (<15%)';
+  if (percentLoss >= 40) hemorrhageClass = 'Class IV (>40%)';
+  else if (percentLoss >= 30) hemorrhageClass = 'Class III (30-40%)';
+  else if (percentLoss >= 15) hemorrhageClass = 'Class II (15-30%)';
+
+  const bleedingFlowRate: BleedingFlowRate = severity === 'Severe' ? 'Venous Bleed (Steady Flow)' : 'Capillary Ooze (Slow Trickle)';
+
+  return {
+    id: 'blip2-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    woundType,
+    woundTypeDescription: {
+      en: `${woundType} identified with active clinical presentation.`,
+      hi: `${woundType} की पहचान की गई।`,
+      ta: `${woundType} கண்டறியப்பட்டது.`
+    },
+    severity,
+    confidenceScore: severity === 'Severe' ? 96.4 : 93.8,
+    affectedAreaEstimate: `approx ${lengthCm}cm x ${widthCm}cm`,
+    measurement: {
+      lengthCm,
+      widthCm,
+      depthMm,
+      depthGrade,
+      surfaceAreaCm2,
+      perimeterCm,
+      formattedText: `${lengthCm} cm x ${widthCm} cm (Area ~${surfaceAreaCm2} cm²)`,
+      goldenClosureWindowHours: woundType === 'Abrasion' ? 0 : 12
+    },
+    bloodLoss: {
+      estimatedVolumeMl,
+      category: estimatedVolumeMl > 250 ? 'Severe (>250ml)' : estimatedVolumeMl > 50 ? 'Moderate (50-250ml)' : 'Minimal (<50ml)',
+      hemorrhageClass,
+      bleedingFlowRate,
+      percentTotalBloodVolume: percentLoss,
+      patientWeightKg,
+      requiresTourniquet: severity === 'Severe' && percentLoss >= 15,
+      shockIndex: isChildMode ? 1.1 : 0.7
+    },
+    infectionRisk: severity === 'Severe' ? 'High' : severity === 'Moderate' ? 'Moderate' : 'Low',
+    infectionRiskScore: severity === 'Severe' ? 82 : severity === 'Moderate' ? 44 : 15,
+    infectionVisualCues: ['Erythematous Margin', 'Local Inflammatory Response', 'Subcutaneous Disruption'],
+    tetanusRiskDetected: ['Puncture', 'Laceration', 'Dog Bite (Canine)', 'Snakebite (Envenomation)', 'Avulsion & Degloving'].includes(woundType as string) || severity === 'Severe',
+    triageSummary: {
+      en: `${severity} ${woundType} detected. Follow immediate emergency clean dressing procedure.`,
+      hi: `${severity === 'Minor' ? 'मामूली' : severity === 'Moderate' ? 'मध्यम' : 'गंभीर'} ${woundType}। तुरंत प्राथमिक उपचार करें।`,
+      ta: `${severity} ${woundType} கண்டறியப்பட்டது. உடனடியாக முதலுதவி செய்யவும்.`
+    },
+    immediateActionRequired: severity !== 'Minor',
+    firstAidSteps: [
       {
         stepNumber: 1,
         text: {
-          en: 'Keep surgical site strictly dry and covered with clean sterile dressing.',
-          hi: 'सर्जिकल स्थान को सूखा रखें और स्टरलाइज्ड पट्टी से ढककर रखें।',
-          ta: 'அறுவை சிகிச்சை செய்யப்பட்ட இடத்தை உலர்ந்த நிலையில் சுத்தமான கட்டினால் மூடவும்.'
-        },
-        iconType: 'bandage'
-      },
-      {
-        stepNumber: 2,
-        text: {
-          en: 'Inspect incision line daily for redness, warmth, or purulent pus drainage.',
-          hi: 'लालिमा, गर्माहट या मवाद के लिकेज के लिए रोज कट की जांच करें।',
-          ta: 'சிவப்பு, வெப்பம் அல்லது சீழ் கசிவு உள்ளதா என தினமும் சோதிக்கவும்.'
-        },
-        iconType: 'clean'
-      },
-      {
-        stepNumber: 3,
-        text: {
-          en: 'Do NOT pick or stretch sutures/stitches.',
-          hi: 'टांकों (stitches) को खिंचे या छुएं नहीं।',
-          ta: 'தையல்களை இழுக்கவோ தொடவோ வேண்டாம்.'
-        },
-        iconType: 'clean'
-      }
-    ],
-    'Diabetic Foot Ulcer': [
-      {
-        stepNumber: 1,
-        text: {
-          en: 'Gently cleanse ulceration with sterile saline or clean boiled/cooled water.',
-          hi: 'उबले और ठंडे पानी या सेलाइन से छाले को धीरे से धोएं।',
-          ta: 'காயத்தை சுத்தமான காய்ச்சி ஆறிய நீரால் மெதுவாக கழுவவும்.'
-        },
-        iconType: 'water',
-        isUrgent: true
-      },
-      {
-        stepNumber: 2,
-        text: {
-          en: 'Offload pressure completely—do NOT walk barefoot or bear weight on ulcerated sole.',
-          hi: 'घाव वाले पैर पर बिल्कुल वजन न डालें और नंगे पैर न चलें।',
-          ta: 'காயம்பட்ட காலில் எடையைக் கொடுக்க வேண்டாம்; வெறும் காலில் நடக்க வேண்டாம்.'
-        },
-        iconType: 'elevation',
-        isUrgent: true
-      },
-      {
-        stepNumber: 3,
-        text: {
-          en: 'Apply non-adherent foam dressing and schedule urgent diabetic foot evaluation.',
-          hi: 'फोम पट्टी लगाएं और तुरंत डॉक्टर से पैरों की जांच कराएं।',
-          ta: 'மருத்துவப் பஞ்சு கட்டு போட்டு உடனடியாக மருத்துவரிடம் காட்டவும்.'
-        },
-        iconType: 'hospital',
-        isUrgent: true
-      }
-    ],
-    'Bite Wound': [
-      {
-        stepNumber: 1,
-        text: {
-          en: 'CRITICAL: Wash bite wound immediately under running tap water with soap for 15 full minutes.',
-          hi: 'महत्वपूर्ण: कुत्ते के काटने पर घाव को बहते पानी और साबुन से पूरे 15 मिनट तक धोएं।',
-          ta: 'முக்கியம்: கடி பட்ட இடத்தை சோப்பு மற்றும் ஓடும் நீரில் தொடர்ந்து 15 நிமிடங்கள் கழுவவும்.'
-        },
-        iconType: 'water',
-        isUrgent: true
-      },
-      {
-        stepNumber: 2,
-        text: {
-          en: 'Do NOT stitch or tightly seal fresh animal bite wounds without doctor consultation.',
-          hi: 'डॉक्टर की सलाह के बिना जानवरों के काटने पर तुरंत टांके न लगवाएं।',
-          ta: 'மருத்துவர் ஆலோசனையின்றி விலங்கு கடி காயத்திற்கு தையல் போடக் கூடாது.'
-        },
-        iconType: 'clean'
-      },
-      {
-        stepNumber: 3,
-        text: {
-          en: 'CRITICAL: Rush to Primary Health Centre for Anti-Rabies Vaccine (ARV) and Rabies Immunoglobulin.',
-          hi: 'अति आवश्यक: रेबीज के टीके (Anti-Rabies Vaccine) के लिए तुरंत अस्पताल जाएं।',
-          ta: 'அவசரம்: ரேபிஸ் தடுப்பூசி (Anti-Rabies Vaccine) போட உடனடியாக மருத்துவமனைக்குச் செல்லவும்.'
-        },
-        iconType: 'hospital',
-        isUrgent: true
-      }
-    ],
-    'Pressure Ulcer': [
-      {
-        stepNumber: 1,
-        text: {
-          en: 'Reposition patient every 2 hours to relieve sacral/bony pressure.',
-          hi: 'पीठ या कूल्हे के घाव पर दबाव हटाने के लिए मरीज की करवट हर 2 घंटे में बदलें।',
-          ta: 'அழுத்தத்தைக் குறைக்க நோயாளிப் படுக்கையின் பக்கத்தை 2 மணி நேரத்திற்கு ஒருமுறை மாற்றவும்.'
-        },
-        iconType: 'elevation'
-      },
-      {
-        stepNumber: 2,
-        text: {
-          en: 'Clean wound gently and apply moisture-retentive barrier cream or hydrocolloid dressing.',
-          hi: 'घाव को साफ करके हाइड्रोकोलॉइड पट्टी या बैरियर क्रीम लगाएं।',
-          ta: 'காயத்தை மெதுவாகக் கழுவி களிம்பு பூசி பாதுகாக்கவும்.'
-        },
-        iconType: 'antiseptic'
-      }
-    ],
-    Abrasion: [
-      {
-        stepNumber: 1,
-        text: {
-          en: 'Wash hands thoroughly with soap and clean water before touching wound.',
-          hi: 'घाव को छूने से पहले हाथों को साबुन और साफ पानी से अच्छी तरह धोएं।',
-          ta: 'காயத்தைத் தொடுவதற்கு முன் கைகளை சோப்பு மற்றும் சுத்தமான நீரால் நன்கு கழுவவும்.'
-        },
-        iconType: 'clean'
-      },
-      {
-        stepNumber: 2,
-        text: {
-          en: 'Gently rinse scrape under clean running water for 5 minutes to flush out dirt and gravel.',
-          hi: 'धूल और कंकड़ निकालने के लिए बहते साफ पानी के नीचे 5 मिनट तक घाव को धीरे से धोएं।',
-          ta: 'தூசி மற்றும் கற்களை அகற்ற 5 நிமிடங்கள் சுத்தமான ஓடும் நீரில் மெதுவாக கழுவவும்.'
-        },
-        iconType: 'water'
-      },
-      {
-        stepNumber: 3,
-        text: {
-          en: 'Apply a thin layer of povidone-iodine or antiseptic ointment.',
-          hi: 'पोविडोन-आयोडीन या एंटीसेप्टिक मलम की पतली परत लगाएं।',
-          ta: 'போவிடோன்-அயோடின் அல்லது கிருமி நாசினி பூச்சை மெலிதாக தடவவும்.'
-        },
-        iconType: 'antiseptic'
-      },
-      {
-        stepNumber: 4,
-        text: {
-          en: 'Cover loosely with a non-stick sterile gauze bandage to keep dust out.',
-          hi: 'धूल से बचाने के लिए स्टरलाइज्ड सूती पट्टी से ढके।',
-          ta: 'தூசி படாமல் இருக்க சுத்தமான பருத்தி துணியால் லேசாக மூடவும்.'
-        },
-        iconType: 'bandage'
-      }
-    ],
-    Laceration: [
-      {
-        stepNumber: 1,
-        text: {
-          en: 'Apply direct, firm pressure on the cut using a clean cloth or sterile pad for at least 10 minutes.',
-          hi: 'साफ कपड़े या कॉटन पैड से कट पर 10 मिनट तक सीधा दबाव बनाएं।',
-          ta: 'சுத்தமான துணி மூலம் வெட்டுக் காயத்தின் மீது 10 நிமிடங்கள் நேரடியாக அழுத்தம் கொடுக்கவும்.'
+          en: 'Apply direct, firm pressure on the wound using a clean sterile cloth for 10 continuous minutes.',
+          hi: 'साफ कपड़े से घाव पर 10 मिनट तक लगातार सीधा दबाव बनाए रखें।',
+          ta: 'சுத்தமான துணி மூலம் காயத்தின் மீது 10 நிமிடங்கள் தொடர்ந்து அழுத்தவும்.'
         },
         iconType: 'pressure',
         isUrgent: true
@@ -547,398 +534,24 @@ function generateOfflineBLIP2Result(sampleCaseId?: string, baseLatency = 320, pa
       {
         stepNumber: 2,
         text: {
-          en: 'Elevate the injured limb above heart level if possible to reduce arterial flow.',
-          hi: 'खून का बहाव कम करने के लिए प्रभावित हाथ या पैर को छाती के स्तर से ऊपर उठाएं।',
-          ta: 'ரத்தப் போக்கைக் குறைக்க காயம்பட்ட உறுப்பை நெஞ்சு பகுதிக்கு மேலே உயர்த்தவும்.'
-        },
-        iconType: 'elevation'
-      },
-      {
-        stepNumber: 3,
-        text: {
-          en: 'Once bleeding slows, gently wash around the cut with clean boiled/cooled water.',
-          hi: 'खून रुकने के बाद घाव के आसपास उबले और ठंडे पानी से सफाई करें।',
-          ta: 'இரத்தம் நின்றவுடன் காயம் சுற்றியுள்ள பகுதியை காய்ச்சி ஆறிய நீரால் கழுவவும்.'
+          en: isChildMode 
+            ? 'Rinse gently with sterile normal saline or boiled/cooled clean water without rubbing.' 
+            : 'Irrigate thoroughly under running clean water for 5 minutes to flush contaminants.',
+          hi: isChildMode ? 'घाव को रगड़े बिना साफ उबले ठंडे पानी या सेलाइन से धोएं।' : 'घाव को 5 मिनट तक साफ बहते पानी से अच्छी तरह धोएं।',
+          ta: 'காயத்தை காய்ச்சி ஆறிய சுத்தமான நீரால் மென்மையாகக் கழுவவும்.'
         },
         iconType: 'water'
       },
       {
-        stepNumber: 4,
+        stepNumber: 3,
         text: {
-          en: 'Apply a firm sterile pressure bandage and visit nearest Primary Health Centre (PHC) for stitches if gaping.',
-          hi: 'घाव को कसकर बाधें और टांके (stitches) के लिए नजदीकी अस्पताल जाएं।',
-          ta: 'காயத்தை இறுக்கமாகக் கட்டி, தையல் தேவைப்பட்டால் ஆரம்ப சுகாதார நிலையத்திற்குச் செல்லவும்.'
+          en: 'Cover with sterile non-adherent dressing and keep limb elevated.',
+          hi: 'स्टरलाइज्ड पट्टी से ढकें और अंग को थोड़ा ऊंचा रखें।',
+          ta: 'சுத்தமான துணி கட்டு போட்டு காயமடைந்த உறுப்பை உயர்த்தி வைக்கவும்.'
         },
-        iconType: 'hospital',
-        isUrgent: true
+        iconType: 'bandage'
       }
     ],
-    Puncture: [
-      {
-        stepNumber: 1,
-        text: {
-          en: 'Do NOT squeeze or poke deeply inside the puncture hole.',
-          hi: 'पंचर के छेद को न दबाएं और न ही अंदर किसी चीज से कुरेदें।',
-          ta: 'காயத்தின் ஆழத்திற்குள் அழுத்துவதையோ துளைப்பதையோ தவிர்க்கவும்.'
-        },
-        iconType: 'clean',
-        isUrgent: true
-      },
-      {
-        stepNumber: 2,
-        text: {
-          en: 'Rinse puncture thoroughly under clean running water for 10 minutes to clear bacteria.',
-          hi: 'बैक्टीरिया को साफ करने के लिए 10 मिनट तक बहते पानी में घाव धोएं।',
-          ta: 'பாக்டீரியாவை வெளியேற்ற 10 நிமிடங்கள் ஓடும் நீரால் கழுவவும்.'
-        },
-        iconType: 'water',
-        isUrgent: true
-      }
-    ]
-  };
-  /*
-
-          ta: 'பாக்டீரியாவை வெளியேற்ற 10 நிமிடங�        },
-  */
-  const descriptions: Record<string, { en: string; hi: string; ta: string }> = {
-    Abrasion: {
-      en: 'Epidermal scraping with exposed dermal capillaries.',
-      hi: 'त्वचा की ऊपरी परत का छिलना व हल्की लालिमा।',
-      ta: 'தோலின் மேல் அடுக்கு உரிதல் மற்றும் லேசான சிவப்பு.'
-    },
-    Laceration: {
-      en: 'Dermal & subcutaneous cut with open tissue margins.',
-      hi: 'त्वचा और मांसपेशियों के बीच का गहरा कट।',
-      ta: 'தோல் மற்றும் திசுக்களில் ஏற்பட்ட ஆழமான வெட்டு.'
-    },
-    Puncture: {
-      en: 'Deep narrow entry channel caused by sharp object.',
-      hi: 'नुकीली वस्तु से त्वचा के अंदर तक हुआ गहरा छेद।',
-      ta: 'கூர்மையான பொருளால் ஏற்பட்ட ஆழமான துளை.'
-    },
-    Burn: {
-      en: 'Thermal epidermal/dermal injury with erythema and blistering.',
-      hi: 'गर्मी या गर्म तरल से त्वचा का जलना व छाले।',
-      ta: 'வெப்பம் அல்லது சூடான திரவத்தால் தோல் எரிச்சல்.'
-    },
-    Contusion: {
-      en: 'Subcutaneous hematoma and tissue contusion from blunt impact.',
-      hi: 'भीतरी थक्का और त्वचा के नीचे नीलापन (गुम चोट)।',
-      ta: 'தோலின் அடியில் இரத்தம் உறைதல் மற்றும் வீக்கம்.'
-    },
-    'Surgical Incision': {
-      en: 'Surgical wound site with approximating suture lines and healing tissue.',
-      hi: 'टांकों के साथ सर्जिकल कट का स्थान।',
-      ta: 'அறுவை சிகிச்சை தையல் இடம்.'
-    },
-    'Diabetic Foot Ulcer': {
-      en: 'Neuropathic chronic tissue ulceration over pressure points.',
-      hi: 'डायबिटिक पैर का पुराना न भरने वाला घाव।',
-      ta: 'சர்க்கரை நோயாளிகளுக்கான ஆறாத புண்.'
-    },
-    'Bite Wound': {
-      en: 'Animal/human bite puncture or laceration with saliva contamination risk.',
-      hi: 'जानवर के काटने का गहरा निशान, रेबीज जोखिम।',
-      ta: 'விலங்கு கடி காயம், ரேபிஸ் அபாயம்.'
-    },
-    'Pressure Ulcer': {
-      en: 'Decubitus tissue breakdown due to sustained pressure over bony prominence.',
-      hi: 'लंबे समय तक लेटे रहने से बना बेड सोर (छाला)।',
-      ta: 'படுக்கைப் புண்.'
-    }
-  };
-
-  const medicineMapByWound: Record<string, any[]> = {
-    Abrasion: [
-      {
-        name: 'Povidone-Iodine 5% Ointment (Betadine)',
-        genericName: 'Povidone-Iodine',
-        category: 'Topical Antiseptic',
-        harmLevel: 'Very Low (Safe OTC)',
-        estimatedPriceINR: '₹35 - ₹65',
-        estimatedPriceUSD: '$0.40 - $0.80',
-        purpose: {
-          en: 'Broad-spectrum antimicrobial protection for superficial scrapes',
-          hi: 'बैक्टीरिया और कीटाणुओं से बचाव के लिए एंटीसेप्टिक मरहम',
-          ta: 'கிருமித் தொற்றைத் தடுக்கும் போவிடோன்-அயோடின் களிம்பு'
-        },
-        dosageInstructions: {
-          en: 'Apply thin film over cleaned wound 1-2 times daily',
-          hi: 'घाव धोने के बाद दिन में 1-2 बार पतली परत लगाएं',
-          ta: 'காயத்தை சுத்தப்படுத்திய பின் நாளில் 1-2 முறை தடவவும்'
-        },
-        safetyPrecautions: {
-          en: 'External skin use only. Discontinue if rash occurs.',
-          hi: 'केवल बाहरी त्वचा पर लगाएं। दाने होने पर बंद करें।',
-          ta: 'வெளிப்புற தோல் பயன்பாட்டிற்கு மட்டும்.'
-        },
-        requiresPrescription: false
-      },
-      {
-        name: 'Framycetin Skin Cream (Soframycin 1%)',
-        genericName: 'Framycetin Sulphate',
-        category: 'Mild & Safe (OTC)',
-        harmLevel: 'Very Low (Safe OTC)',
-        estimatedPriceINR: '₹40 - ₹75',
-        estimatedPriceUSD: '$0.50 - $0.90',
-        purpose: {
-          en: 'Mild topical antibiotic cream for minor cuts & scrapes',
-          hi: 'मामूली छिलने व कटने पर लगाने वाली एंटीबायोटिक क्रीम',
-          ta: 'சிறு காயங்களுக்கான பிராமிசெடின் கிரீம்'
-        },
-        dosageInstructions: {
-          en: 'Apply a small dab onto sterile gauze and place on wound',
-          hi: 'पट्टी पर थोड़ी सी क्रीम लगाकर घाव पर रखें',
-          ta: 'சிறிய அளவு கிரீம் தடவி கட்டு போடவும்'
-        },
-        safetyPrecautions: {
-          en: 'Keep away from eyes. Do not swallow.',
-          hi: 'आंखों से दूर रखें। केवल त्वचा के लिए।',
-          ta: 'கண்களில் படாமல் காக்கவும்.'
-        },
-        requiresPrescription: false
-      },
-      {
-        name: 'Paracetamol 500mg Tablets (Crocin / Dolo 500)',
-        genericName: 'Paracetamol',
-        category: 'Pain Relief (Analgesic)',
-        harmLevel: 'Moderate (Follow Dosage)',
-        estimatedPriceINR: '₹15 - ₹30 (Strip of 10)',
-        estimatedPriceUSD: '$0.20 - $0.40',
-        purpose: {
-          en: 'Relieves surface wound pain and localized soreness',
-          hi: 'हल्के दर्द और बुखार से राहत के लिए',
-          ta: 'லேசான வலி மற்றும் காய்ச்சல் நிவாரணி'
-        },
-        dosageInstructions: {
-          en: '1 tablet after meals if needed (Max 3 tablets in 24 hours)',
-          hi: 'जरूरत पड़ने पर भोजन के बाद 1 गोली (दिन में अधिकतम 3 गोली)',
-          ta: 'தேவைப்பட்டால் உணவுக்குப் பின் 1 மாத்திரை'
-        },
-        safetyPrecautions: {
-          en: 'Do not exceed 4,000mg daily. Avoid alcohol.',
-          hi: 'अधिकतम खुराक से ज्यादा न लें।',
-          ta: 'அதிகப்படியான அளவைத் தவிர்க்கவும்.'
-        },
-        requiresPrescription: false
-      }
-    ],
-    Laceration: [
-      {
-        name: 'Povidone-Iodine 10% Solution (Betadine Liquid Wash)',
-        genericName: 'Povidone-Iodine Liquid',
-        category: 'Topical Antiseptic',
-        harmLevel: 'Very Low (Safe OTC)',
-        estimatedPriceINR: '₹45 - ₹85',
-        estimatedPriceUSD: '$0.55 - $1.00',
-        purpose: {
-          en: 'Sterile antiseptic wash to flush deep dirt and bacteria',
-          hi: 'गहरे कट को साफ करने और कीटाणुरहित करने का घोल',
-          ta: 'வெட்டுக்காயத்தை சுத்தப்படுத்தும் கரைசல்'
-        },
-        dosageInstructions: {
-          en: 'Dilute 1:1 with sterile boiled water to irrigate wound',
-          hi: 'उबले ठंडे पानी के साथ मिलाकर घाव को धोएं',
-          ta: 'சுத்தமான தண்ணீருடன் கலந்து காயத்தைக் கழுவவும்'
-        },
-        safetyPrecautions: {
-          en: 'Avoid internal organ contact. Do not swallow.',
-          hi: 'भीतरी अंगों पर न डालें।',
-          ta: 'உட்புற உறுப்புகளில் படாமல் தவிர்க்கவும்.'
-        },
-        requiresPrescription: false
-      },
-      {
-        name: 'Amoxicillin + Clavulanic Acid 625mg (Augmentin)',
-        genericName: 'Amoxicillin & Potassium Clavulanate',
-        category: 'Prescription Antibiotic',
-        harmLevel: 'High Caution (Rx Required)',
-        estimatedPriceINR: '₹140 - ₹240 (Strip of 10)',
-        estimatedPriceUSD: '$1.70 - $2.90',
-        purpose: {
-          en: 'Broad-spectrum oral antibiotic to prevent deep wound sepsis',
-          hi: 'गहरे घाव में गंभीर इन्फेक्शन रोकने की एंटीबायोटिक दवाई',
-          ta: 'ஆழமான வெட்டுகாயங்களில் தொற்று பரவுவதைத் தடுக்கும் மாத்திரை'
-        },
-        dosageInstructions: {
-          en: 'DOCTOR PRESCRIPTION REQUIRED: 1 tablet twice daily for 5 days',
-          hi: 'केवल डॉक्टर की सलाह पर: दिन में 2 बार भोजन के बाद',
-          ta: 'மருத்துவரின் அறிவுரைப்படி மட்டுமே உட்கொள்ளவும்'
-        },
-        safetyPrecautions: {
-          en: 'Inform doctor if Penicillin allergic. Complete full 5-day course.',
-          hi: 'डॉक्टर का पर्चा अनिवार्य। कोर्स पूरा करें।',
-          ta: 'மருத்துவர் சீட்டு கட்டாயம்.'
-        },
-        requiresPrescription: true
-      },
-      {
-        name: 'Ibuprofen 400mg + Paracetamol 325mg (Combiflam)',
-        genericName: 'Ibuprofen & Paracetamol',
-        category: 'Pain Relief (Analgesic)',
-        harmLevel: 'Moderate (Follow Dosage)',
-        estimatedPriceINR: '₹25 - ₹50',
-        estimatedPriceUSD: '$0.30 - $0.60',
-        purpose: {
-          en: 'Dual action anti-inflammatory & pain relief for torn tissues',
-          hi: 'कट के कारण होने वाले दर्द व सूजन को कम करती है',
-          ta: 'வலி மற்றும் வீக்கத்தைக் குறைக்கும் மாத்திரை'
-        },
-        dosageInstructions: {
-          en: '1 tablet after full meal when pain is severe (Max 2 times daily)',
-          hi: 'भोजन के बाद 1 गोली (दिन में ज्यादा से ज्यादा 2 बार)',
-          ta: 'உணவுக்கு பின் 1 மாத்திரை'
-        },
-        safetyPrecautions: {
-          en: 'Take with food to protect stomach lining. Avoid if gastric ulcer.',
-          hi: 'खाली पेट न लें। अल्सर के मरीज न लें।',
-          ta: 'வெறும் வயிற்றில் சாப்பிடக் கூடாது.'
-        },
-        requiresPrescription: false
-      }
-    ],
-    Burn: [
-      {
-        name: 'Silver Sulfadiazine 1% Cream (Silverex / Silvadene)',
-        genericName: 'Silver Sulfadiazine',
-        category: 'Topical Antiseptic',
-        harmLevel: 'Very Low (Safe OTC)',
-        estimatedPriceINR: '₹50 - ₹110',
-        estimatedPriceUSD: '$0.60 - $1.35',
-        purpose: {
-          en: 'Gold-standard topical antimicrobial for 1st & 2nd degree burn wounds',
-          hi: 'जले हुए घाव के लिए सर्वोत्तम एंटीबायोटिक क्रीम',
-          ta: 'தீக்காயங்களுக்கான சிறந்த சில்வர் சல்பாடயாசின் கிரீம்'
-        },
-        dosageInstructions: {
-          en: 'Apply a thick layer (1-2mm) gently, cover with sterile gauze',
-          hi: 'जली त्वचा पर हल्की मोटी परत लगाएं और साफ पट्टी से ढकें',
-          ta: 'எரிச்சல் உள்ள இடத்தில் தடிமனான அடுக்காகப் பூசவும்'
-        },
-        safetyPrecautions: {
-          en: 'External use only. Discontinue if hypersensitive.',
-          hi: 'केवल बाहरी उपयोग।',
-          ta: 'வெளிப்புற பயன்பாட்டிற்கு மட்டும்.'
-        },
-        requiresPrescription: false
-      },
-      {
-        name: 'Paraffin Gauze Dressing Sheet (Bactigras)',
-        genericName: 'Chlorhexidine Acetate Tulle Gras',
-        category: 'Mild & Safe (OTC)',
-        harmLevel: 'Very Low (Safe OTC)',
-        estimatedPriceINR: '₹35 - ₹80',
-        estimatedPriceUSD: '$0.40 - $1.00',
-        purpose: {
-          en: 'Non-stick sterile mesh dressing to prevent skin tearing during changes',
-          hi: 'घाव से न चिपकने वाली मोमी जालीदार पट्टी',
-          ta: 'காயத்தில் ஒட்டாத பாரஃபின் துணி கட்டு'
-        },
-        dosageInstructions: {
-          en: 'Place directly over burn gel before applying outer cotton bandage',
-          hi: 'क्रीम लगाने के बाद सीधे घाव पर रखें',
-          ta: 'கிரீம் தடவிய பின் நேரடியாக காயத்தின் மேல் வைக்கவும்'
-        },
-        safetyPrecautions: {
-          en: 'Single-use sterile sheet.',
-          hi: 'एक बार ही इस्तेमाल करें।',
-          ta: 'ஒரு முறை மட்டுமே பயன்படுத்தவும்.'
-        },
-        requiresPrescription: false
-      }
-    ],
-    Puncture: [
-      {
-        name: 'Tetanus Toxoid (TT) 0.5ml Injection',
-        genericName: 'Tetanus Vaccine Adsorbed',
-        category: 'Vaccine / Immunoglobulin',
-        harmLevel: 'Low (Mild External)',
-        estimatedPriceINR: '₹12 - ₹25',
-        estimatedPriceUSD: '$0.15 - $0.30',
-        purpose: {
-          en: 'Essential immunization against Clostridium tetani in deep puncture wounds',
-          hi: 'गहरे छेद व जंग लगे लोहे के घाव में टिटनेस से सुरक्षा',
-          ta: 'டெட்டானஸ் கிருமித் தொற்றைத் தடுக்கும் தடுப்பூசி'
-        },
-        dosageInstructions: {
-          en: 'Administer 0.5ml Intramuscularly at nearest PHC/Clinic within 24 hours',
-          hi: 'नजदीकी स्वास्थ्य केंद्र पर 24 घंटे में टीका लगवाएं',
-          ta: 'ஆரம்ப சுகாதார நிலையத்தில் 24 மணி நேரத்திற்குள் ஊசி போடவும்'
-        },
-        safetyPrecautions: {
-          en: 'Must be administered by qualified nurse or doctor.',
-          hi: 'केवल स्वास्थ्य कार्यकर्ता द्वारा लगवाया जाए।',
-          ta: 'செவிலியர் மூலம் மட்டுமே செலுத்த வேண்டும்.'
-        },
-        requiresPrescription: false
-      }
-    ],
-    'Bite Wound': [
-      {
-        name: 'Anti-Rabies Vaccine (ARV - Rabipur / Abhayrab 0.5ml)',
-        genericName: 'Inactivated Rabies Virus Vaccine',
-        category: 'Vaccine / Immunoglobulin',
-        harmLevel: 'High Caution (Rx Required)',
-        estimatedPriceINR: '₹350 - ₹450 (Free at Govt PHC)',
-        estimatedPriceUSD: '$4.20 - $5.50',
-        purpose: {
-          en: 'LIFESAVING prophylaxis against fatal rabies virus after animal bite',
-          hi: 'जीवनरक्षक: जानवर के काटने पर रेबीज से बचाव का अनिवार्य टीका',
-          ta: 'ரேபிஸ் வைரஸிலிருந்து காக்கும் அவசியமான தடுப்பூसी'
-        },
-        dosageInstructions: {
-          en: 'Days 0, 3, 7, 14, and 28 post-bite at Govt Hospital / PHC',
-          hi: 'काटने के दिन (Day 0), 3, 7, 14 और 28वें दिन डॉक्टर से लगवाएं',
-          ta: '0, 3, 7, 14, 28 ஆம் நாட்களில் போட்டுக்கொள்ளவும்'
-        },
-        safetyPrecautions: {
-          en: 'Urgently visit hospital within 24h. Do not delay doses.',
-          hi: '24 घंटे के अंदर अस्पताल पहुंचें। खुराक न छोड़ें।',
-          ta: 'தாமதிக்காமல் உடனடியாக மருத்துவமனை செல்லவும்.'
-        },
-        requiresPrescription: true
-      }
-    ]
-  };
-
-  const defaultDesc = descriptions[woundType] || {
-    en: `${woundType} identified with tissue involvement.`,
-    hi: `${woundType} की पहचान की गई।`,
-    ta: `${woundType} கண்டறியப்பட்டது.`
-  };
-
-  const defaultSteps = stepsMap[woundType] || stepsMap['Laceration'];
-  const selectedMeds = medicineMapByWound[woundType] || medicineMapByWound['Abrasion'];
-
-  const lengthCm = severity === 'Severe' ? 5.2 : severity === 'Moderate' ? 3.4 : 1.8;
-  const widthCm = severity === 'Severe' ? 2.8 : severity === 'Moderate' ? 1.6 : 0.9;
-  const infectionRiskScore = severity === 'Severe' ? 82 : severity === 'Moderate' ? 44 : 15;
-  const tetanusRiskDetected = ['Puncture', 'Laceration', 'Bite Wound'].includes(woundType) || severity === 'Severe';
-
-  return {
-    id: 'blip2-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    woundType,
-    woundTypeDescription: defaultDesc,
-    severity,
-    confidenceScore: severity === 'Severe' ? 96.4 : 93.8,
-    affectedAreaEstimate: `approx ${lengthCm}cm x ${widthCm}cm`,
-    measurement: {
-      lengthCm,
-      widthCm,
-      formattedText: `${lengthCm} cm x ${widthCm} cm (Est. Area ~${(lengthCm * widthCm).toFixed(1)} cm²)`
-    },
-    infectionRisk: severity === 'Severe' ? 'High' : severity === 'Moderate' ? 'Moderate' : 'Low',
-    infectionRiskScore,
-    infectionVisualCues: ['Erythematous Margin', 'Local Inflammatory Response', 'Subcutaneous Disruption'],
-    tetanusRiskDetected,
-    triageSummary: {
-      en: `${severity} ${woundType} detected. Follow immediate emergency clean dressing procedure.`,
-      hi: `${severity === 'Minor' ? 'मामूली' : severity === 'Moderate' ? 'मध्यम' : 'गंभीर'} ${woundType}। तुरंत प्राथमिक उपचार करें।`,
-      ta: `${severity} ${woundType} கண்டறியப்பட்டது. உடனடியாக முதலுதவி செய்யவும்.`
-    },
-    immediateActionRequired: severity !== 'Minor',
-    firstAidSteps: defaultSteps,
     criticalWarnings: [
       {
         en: 'DO NOT apply cow dung, mud, ash, or turmeric paste directly inside deep wounds.',
@@ -953,12 +566,42 @@ function generateOfflineBLIP2Result(sampleCaseId?: string, baseLatency = 320, pa
     ],
     recommendedMedicinesOrDressings: [
       {
-        en: 'Povidone-Iodine 5% Antiseptic Ointment & Sterile Cotton Bandage',
-        hi: 'पोविडोन-आयोडीन मलम और स्टरलाइज्ड कॉटन पट्टी',
-        ta: 'போவிடோன்-அயோடின் களிம்பு மற்றும் சுத்தமான துணி கட்டு'
+        en: isChildMode ? 'Sterile Saline Wash & Child-Safe Non-Stick Gauze' : 'Povidone-Iodine 5% Antiseptic Ointment & Sterile Cotton Bandage',
+        hi: isChildMode ? 'सेलाइन वॉश और बच्चों के लिए सुरक्षित चिपकने न वाली पट्टी' : 'पोविडोन-आयोडीन मलम और स्टरलाइज्ड कॉटन पट्टी',
+        ta: 'சுத்தமான செலைன் மற்றும் மென்மையான கட்டு'
       }
     ],
-    medicineRecommendations: selectedMeds,
+    medicineRecommendations: [
+      {
+        name: isChildMode ? 'Paracetamol Oral Suspension (15 mg/kg)' : 'Paracetamol 500mg Tablets (Crocin / Dolo 500)',
+        genericName: 'Paracetamol',
+        category: 'Pain Relief (Analgesic)',
+        harmLevel: 'Moderate (Follow Dosage)',
+        estimatedPriceINR: isChildMode ? '₹35 - ₹60 (Syrup Bottle)' : '₹15 - ₹30 (Strip of 10)',
+        estimatedPriceUSD: '$0.40 - $0.75',
+        purpose: {
+          en: isChildMode ? 'Gentle pediatric fever and wound pain relief' : 'Relieves surface wound pain and localized soreness',
+          hi: 'दर्द और हल्के बुखार से राहत के लिए',
+          ta: 'வலி மற்றும் காய்ச்சல் நிவாரணி'
+        },
+        dosageInstructions: {
+          en: isChildMode ? 'Administer weight-adjusted dose (15 mg/kg) every 6 hours if needed' : '1 tablet after meals if needed (Max 3 tablets in 24h)',
+          hi: isChildMode ? 'बच्चे के वजन अनुसार डॉक्टर द्वारा बताई खुराक दें' : 'जरूरत पड़ने पर भोजन के बाद 1 गोली लें',
+          ta: 'தேவைப்பட்டால் உணவுக்குப் பின் மருத்துவர் அறிவுரைப்படி உட்கொள்ளவும்'
+        },
+        safetyPrecautions: {
+          en: isChildMode ? 'DO NOT USE ASPIRIN IN CHILDREN (Reye Syndrome Risk). Do not overdose.' : 'Do not exceed 4,000mg daily. Avoid alcohol.',
+          hi: 'बच्चों को एस्पिरिन न दें। अधिक मात्रा न लें।',
+          ta: 'குழந்தைகளுக்கு ஆஸ்பிரின் கொடுக்கக் கூடாது.'
+        },
+        requiresPrescription: false,
+        pediatricSafetyWarning: isChildMode ? {
+          en: 'Child Safety: Use calibrated measuring syringe. Avoid aspirin.',
+          hi: 'बच्चों की सुरक्षा: सिरिंज से सही नाप कर दें।',
+          ta: 'குழந்தை பாதுகாப்பு: சரியான அளவில் கொடுக்கவும்.'
+        } : undefined
+      }
+    ],
     recoveryDiet: {
       foodsToEat: [
         { en: 'High-protein eggs, paneer, & lentils for wound tissue synthesis', hi: 'प्रोटीन युक्त दालें, पनीर और अंडे', ta: 'புரதம் நிறைந்த பருப்பு மற்றும் பன்னீர்' },
@@ -968,9 +611,9 @@ function generateOfflineBLIP2Result(sampleCaseId?: string, baseLatency = 320, pa
         { en: 'Excess refined sugar, unpasteurized milk, and raw unboiled water', hi: 'अत्यधिक चीनी व बिना उबला पानी', ta: 'அதிக சர்க்கரை மற்றும் காய்ச்சாத நீர்' }
       ],
       hydrationAdvice: {
-        en: 'Maintain 2.5 to 3 Liters of clean boiled or filtered water daily',
-        hi: 'प्रतिदिन 2.5 से 3 लीटर साफ उबला पानी पीएं',
-        ta: 'தினமும் 2.5 - 3 லிட்டர் காய்ச்சிய நீர் குடிக்கவும்'
+        en: isChildMode ? 'Ensure frequent sips of boiled cooled water or ORS' : 'Maintain 2.5 to 3 Liters of clean boiled or filtered water daily',
+        hi: isChildMode ? 'उबला ठंडा पानी या ओआरएस घोल पिलाते रहें' : 'प्रतिदिन 2.5 से 3 लीटर साफ उबला पानी पीएं',
+        ta: 'தினமும் போதுமான அளவு காய்ச்சிய நீர் குடிக்கவும்'
       },
       restAdvice: {
         en: 'Keep affected limb elevated above heart level when resting; 8 hours sleep',
@@ -979,9 +622,9 @@ function generateOfflineBLIP2Result(sampleCaseId?: string, baseLatency = 320, pa
       }
     },
     pediatricNotes: isChildMode ? {
-      en: 'Pediatric Care (<18 Yrs): Wash with warm clean water gently. Do not scrub. Use child-safe dosage.',
-      hi: 'बाल देखभाल: घाव को धीरे से साफ करें। बच्चों के लिए सुरक्षित खुराक ही दें।',
-      ta: 'குழந்தை பராமரிப்பு: மென்மையாகக் கழுவவும்.'
+      en: 'Pediatric Care Alert: Clean wound gently with sterile saline. Do NOT use adult tablets or aspirin. Keep child calm and monitor capillary refill.',
+      hi: 'बाल देखभाल: घाव को धीरे से साफ करें। बच्चों को वयस्कों की गोलियां न दें।',
+      ta: 'குழந்தை பராமரிப்பு: மென்மையாகக் கழுவவும். குழந்தையை அமைதிப்படுத்தவும்.'
     } : undefined,
     isChildMode,
     doctorVisitUrgency: {
@@ -993,152 +636,5 @@ function generateOfflineBLIP2Result(sampleCaseId?: string, baseLatency = 320, pa
     processingTimeMs: baseLatency
   };
 }
-
-/* UNUSED_TAIL_START
-  text: {
-          en: 'Apply Silver Sulfadiazine cream or sterile burn gel gently.',
-          hi: 'सिल्वर सल्फाडायजीन क्रीम या बर्न जेल धीरे से लगाएं।',
-          ta: 'சில்வர் சல்பாடயாசின் கிரீம் அல்லது பர்ன் ஜெல் மெதுவாக தடவவும்.'
-        },
-        iconType: 'antiseptic'
-      },
-      {
-        stepNumber: 4,
-        text: {
-          en: 'Cover loosely with clean dry non-adhesive cloth or plastic cling wrap.',
-          hi: 'साफ और सूखे कपड़े से हल्का ढके।',
-          ta: 'சுத்தமான உலர்ந்த துணியால் லேசாக மூடவும்.'
-        },
-        iconType: 'bandage'
-      }
-    ],
-    Contusion: [
-      {
-        stepNumber: 1,
-        text: {
-          en: 'Apply a cold ice compress wrapped in a towel for 15 minutes to reduce swelling.',
-          hi: 'सूजन कम करने के लिए तौलिए में लिपटी बर्फ से 15 मिनट सिंकाई करें।',
-          ta: 'வீக்கத்தைக் குறைக்க துணியில் சுற்றப்பட்ட ஐஸ் கட்டியால் 15 நிமிடங்கள் ஒத்தடம் கொடுக்கவும்.'
-        },
-        iconType: 'ice'
-      },
-      {
-        stepNumber: 2,
-        text: {
-          en: 'Rest the injured area and avoid putting heavy weight on it.',
-          hi: 'चोटिल अंग को आराम दें और भारी वजन उठाने से बचें।',
-          ta: 'காயம்பட்ட பகுதிக்கு ஓய்வு அளிக்கவும்; கனமான எடையைத் தூக்குவதைத் தவிர்க்கவும்.'
-        },
-        iconType: 'clean'
-      },
-      {
-        stepNumber: 3,
-        text: {
-          en: 'Elevate the bruised limb when resting to drain fluid congestion.',
-          hi: 'आराम करते समय प्रभावित हाथ-पैर को थोड़ा ऊपर उठाकर रखें।',
-          ta: 'ஓய்வு எடுக்கும் போது காயம்பட்ட உறுப்பை சிறிது உயர்த்தி வைக்கவும்.'
-        },
-        iconType: 'elevation'
-      }
-    ]
-  };
-
-  const descriptions: Record<string, { en: string; hi: string; ta: string }> = {
-    Abrasion: {
-      en: 'Epidermal scraping with exposed dermal capillaries.',
-      hi: 'त्वचा की ऊपरी परत का छिलना व हल्की लालिमा।',
-      ta: 'தோலின் மேல் அடுக்கு உரிதல் மற்றும் லேசான சிவப்பு.'
-    },
-    Laceration: {
-      en: 'Dermal & subcutaneous cut with open tissue margins.',
-      hi: 'त्वचा और मांसपेशियों के बीच का गहरा कट।',
-      ta: 'தோல் மற்றும் திசுக்களில் ஏற்பட்ட ஆழமான வெட்டு.'
-    },
-    Puncture: {
-      en: 'Deep narrow entry channel caused by sharp object.',
-      hi: 'नुकीली वस्तु से त्वचा के अंदर तक हुआ गहरा छेद।',
-      ta: 'கூர்மையான பொருளால் ஏற்பட்ட ஆழமான துளை.'
-    },
-    Burn: {
-      en: 'Thermal epidermal/dermal injury with erythema and blistering.',
-      hi: 'गर्मी या गर्म तरल से त्वचा का जलना व छाले।',
-      ta: 'வெப்பம் அல்லது சூடான திரவத்தால் தோல் எரிச்சல்.'
-    },
-    Contusion: {
-      en: 'Subcutaneous hematoma and tissue contusion from blunt impact.',
-      hi: 'भीतरी थक्का और त्वचा के नीचे नीलापन (गुम चोट)।',
-      ta: 'தோலின் அடியில் இரத்தம் உறைதல் மற்றும் வீக்கம்.'
-    },
-    'Surgical Incision': {
-      en: 'Surgical wound site with approximating suture lines and healing tissue.',
-      hi: 'टांकों के साथ सर्जिकल कट का स्थान।',
-      ta: 'அறுவை சிகிச்சை தையல் இடம்.'
-    },
-    'Diabetic Foot Ulcer': {
-      en: 'Neuropathic chronic tissue ulceration over pressure points.',
-      hi: 'डायबिटिक पैर का पुराना न भरने वाला घाव।',
-      ta: 'சர்க்கரை நோயாளிகளுக்கான ஆறாத புண்.'
-    },
-    'Bite Wound': {
-      en: 'Animal/human bite puncture or laceration with saliva contamination risk.',
-      hi: 'जानवर के काटने का गहरा निशान, रेबीज जोखिम।',
-      ta: 'விலங்கு கடி காயம், ரேபிஸ் அபாயம்.'
-    },
-    'Pressure Ulcer': {
-      en: 'Decubitus tissue breakdown due to sustained pressure over bony prominence.',
-      hi: 'लंबे समय तक लेटे रहने से बना बेड सोर (छाला)।',
-      ta: 'படுக்கைப் புண்.'
-    }
-  };
-
-  const defaultDesc = descriptions[woundType] || {
-    en: `${woundType} identified with tissue involvement.`,
-    hi: `${woundType} की पहचान की गई।`,
-    ta: `${woundType} கண்டறியப்பட்டது.`
-  };
-
-  const defaultSteps = stepsMap[woundType] || stepsMap['Laceration'];
-
-  return {
-    id: 'blip2-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    woundType,
-    woundTypeDescription: defaultDesc,
-    severity,
-    confidenceScore: severity === 'Severe' ? 96.4 : 93.8,
-    affectedAreaEstimate: 'approx 3.5cm x 2.0cm',
-    infectionRisk: severity === 'Severe' ? 'High' : severity === 'Moderate' ? 'Moderate' : 'Low',
-    triageSummary: {
-      en: `${severity} ${woundType} detected. Follow immediate emergency clean dressing procedure.`,
-      hi: `${severity === 'Minor' ? 'मामूली' : severity === 'Moderate' ? 'मध्यम' : 'गंभीर'} ${woundType}। तुरंत प्राथमिक उपचार करें।`,
-      ta: `${severity} ${woundType} கண்டறியப்பட்டது. உடனடியாக முதலுதவி செய்யவும்.`
-    },
-    immediateActionRequired: severity !== 'Minor',
-    firstAidSteps: defaultSteps,
-    criticalWarnings: [
-      {
-        en: 'DO NOT apply cow dung, mud, ash, or turmeric paste directly inside deep wounds.',
-        hi: 'गहरे घाव के अंदर गोबर, मिट्टी, राख या हल्दी पाउडर कभी न डालें।',
-        ta: 'ஆழமான காயத்திற்குள் மாட்டுச் சாணம், மண் அல்லது சாம்பல் இடக் கூடாது.'
-      },
-      {
-        en: 'Ensure Tetanus Toxoid (TT) vaccination is updated within 24 hours.',
-        hi: '24 घंटे के भीतर टिटनेस का टीका अवश्य लगवाएं।',
-        ta: '24 மணி நேரத்திற்குள் டெட்டானஸ் தடுப்பூசி போட்டுக்கொள்ளவும்.'
-      }
-    ],
-    recommendedMedicinesOrDressings: [
-      {
-        en: 'Povidone-Iodine 5% Antiseptic Ointment & Sterile Cotton Bandage',
-        hi: 'पोविडोन-आयोडीन मलम और स्टरलाइज्ड कॉटन पट्टी',
-        ta: 'போவிடோன்-அயோடின் களிம்பு மற்றும் சுத்தமான துணி கட்டு'
-      }
-    ],
-    doctorVisitUrgency: {
-      en: severity === 'Severe' ? 'IMMEDIATE EMERGENCY PHC / HOSPITAL REFERRAL' : 'Visit clinic within 24 hours if pain or swelling increases.',
-      hi: severity === 'Severe' ? 'तुरंत नजदीकी अस्पताल या 108 एम्बुलेंस से संपर्क करें' : 'यदि दर्द या सूजन बढ़े तो 24 घंटे में डॉक्टर को दिखाएं।',
-      ta: severity === 'Severe' ? 'உடனடியாக ஆரம்ப சுகாதார நிலையத்திற்குச் செல்லவும்' : 'வலி அதிகரித்தால் 24 மணி நேரத்திற்குள் மருத்துவரை அணுகவும்.'
-    },
-  UNUSED_TAIL_END */
 
 startServer();
