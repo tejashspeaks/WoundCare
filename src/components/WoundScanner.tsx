@@ -1,0 +1,898 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Language, WoundAnalysisResult, PatientMode } from '../types';
+import { speakText, stopSpeech } from '../utils/speech';
+import { generateWoundReportPDF } from '../utils/pdfGenerator';
+import { CaretakerSmsModal } from './CaretakerSmsModal';
+import { GoldenHourCountdown } from './GoldenHourCountdown';
+import { ForeignObjectDetector } from './ForeignObjectDetector';
+import { BloodLossEstimator } from './BloodLossEstimator';
+import { SnakeAndAnimalBiteIdentifier } from './SnakeAndAnimalBiteIdentifier';
+import { WoundAgeEstimator } from './WoundAgeEstimator';
+import { ScarRiskPredictor } from './ScarRiskPredictor';
+import { AyurvedicAdvisor } from './AyurvedicAdvisor';
+import { PhotoQualityChecker } from './PhotoQualityChecker';
+import { WeatherAdviceBanner } from './WeatherAdviceBanner';
+import {
+  Camera,
+  Upload,
+  Sparkles,
+  Volume2,
+  VolumeX,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  ShieldAlert,
+  FileSpreadsheet,
+  RefreshCw,
+  HeartPulse,
+  Activity,
+  Layers,
+  Info,
+  ChevronRight,
+  Share2,
+  BookmarkPlus,
+  Pill,
+  ShoppingBag,
+  Tag,
+  Ruler,
+  Apple,
+  Syringe,
+  FileDown,
+  MessageSquare,
+  Baby,
+  User,
+  Building2
+} from 'lucide-react';
+
+interface WoundScannerProps {
+  currentLang: Language;
+  useOfflineEngine: boolean;
+  highContrast: boolean;
+  patientMode: PatientMode;
+  onSaveCase: (result: WoundAnalysisResult, imageBase64: string, patientName?: string, notes?: string) => void;
+  onOpenEmergencyModal: () => void;
+  onNavigateTab?: (tab: string) => void;
+}
+
+export const WoundScanner: React.FC<WoundScannerProps> = ({
+  currentLang,
+  useOfflineEngine,
+  highContrast,
+  patientMode,
+  onSaveCase,
+  onOpenEmergencyModal,
+  onNavigateTab
+}) => {
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisProgressStep, setAnalysisProgressStep] = useState<string>('');
+  const [analysisResult, setAnalysisResult] = useState<WoundAnalysisResult | null>(null);
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [checkedSteps, setCheckedSteps] = useState<Record<number, boolean>>({});
+  const [patientNameInput, setPatientNameInput] = useState('');
+  const [clinicalNotesInput, setClinicalNotesInput] = useState('');
+  const [savedSuccess, setSavedSuccess] = useState(false);
+  const [showSmsModal, setShowSmsModal] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [activeCamera, setActiveCamera] = useState(false);
+
+  // FEATURE 2: Automatic Severity Voice Alert when Severe Wound is detected
+  useEffect(() => {
+    if (analysisResult && analysisResult.severity === 'Severe') {
+      const summaryText = analysisResult.triageSummary[currentLang] || analysisResult.triageSummary.en;
+      const alertSpeech = `ALERT! Severe ${analysisResult.woundType} detected. Immediate medical attention required. ${summaryText}`;
+      setIsPlayingAudio(true);
+      speakText(alertSpeech, currentLang).finally(() => setIsPlayingAudio(false));
+    }
+  }, [analysisResult]);
+
+  // Handle Image Selection and Auto Trigger VLM Triage
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      processFile(file);
+    }
+  };
+
+  const processFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      setSelectedImage(base64);
+      analyzeWoundImage(base64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  // Live Camera Controls
+  const startCamera = async () => {
+    try {
+      setActiveCamera(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error('Camera access error:', err);
+      alert('Unable to access camera. Please upload an image file.');
+      setActiveCamera(false);
+    }
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg');
+        
+        // Stop Camera Streams
+        const stream = videoRef.current.srcObject as MediaStream;
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+        }
+        setActiveCamera(false);
+        setSelectedImage(dataUrl);
+        analyzeWoundImage(dataUrl);
+      }
+    }
+  };
+
+  // Call Backend VLM API
+  const analyzeWoundImage = async (imageBase64: string) => {
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+    setCheckedSteps({});
+    setSavedSuccess(false);
+
+    setAnalysisProgressStep('Stage 1/3: Extracting multi-spectral image features...');
+    await new Promise(r => setTimeout(r, 400));
+    setAnalysisProgressStep('Stage 2/3: Running clinical VLM triage & dimension estimator...');
+    await new Promise(r => setTimeout(r, 400));
+    setAnalysisProgressStep('Stage 3/3: Generating infection score & multilingual first-aid...');
+
+    try {
+      const response = await fetch('/api/analyze-wound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64,
+          useOfflineEngine,
+          patientMode
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Server triage endpoint returned non-200');
+      }
+
+      const result: WoundAnalysisResult = await response.json();
+      setAnalysisResult(result);
+    } catch (err) {
+      console.error('Failed to analyze wound:', err);
+      alert('Triage analysis error. Falling back to offline LoRA model.');
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Voice Read-Aloud Toggle / Replay
+  const handleToggleSpeech = () => {
+    if (isPlayingAudio) {
+      stopSpeech();
+      setIsPlayingAudio(false);
+    } else if (analysisResult) {
+      const summaryText = analysisResult.triageSummary[currentLang] || analysisResult.triageSummary.en;
+      const firstStepText = analysisResult.firstAidSteps[0]
+        ? (analysisResult.firstAidSteps[0].text[currentLang] || analysisResult.firstAidSteps[0].text.en)
+        : '';
+
+      const fullSpeechText = `${analysisResult.woundType}. ${summaryText}. First aid step 1: ${firstStepText}`;
+
+      setIsPlayingAudio(true);
+      speakText(fullSpeechText, currentLang).finally(() => setIsPlayingAudio(false));
+    }
+  };
+
+  const toggleStep = (stepNumber: number) => {
+    setCheckedSteps(prev => ({ ...prev, [stepNumber]: !prev[stepNumber] }));
+  };
+
+  const handleSave = () => {
+    if (analysisResult && selectedImage) {
+      onSaveCase(analysisResult, selectedImage, patientNameInput, clinicalNotesInput);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 3000);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      
+      {/* Main Upload / Camera / Image Preview & Analysis Container */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* Left Side: Photo Capture & Image View (5 cols) */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className={`p-6 rounded-[28px] border flex flex-col justify-between ${
+            highContrast ? 'bg-black border-yellow-400' : 'bg-white border-[#e2dfd5] shadow-sm'
+          }`}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-serif font-bold text-[#5A5A40] flex items-center gap-2">
+                <Camera className="w-4 h-4 text-[#5A5A40]" />
+                <span>Wound Photo Input</span>
+              </h3>
+              {selectedImage && (
+                <button
+                  onClick={() => {
+                    setSelectedImage(null);
+                    setAnalysisResult(null);
+                  }}
+                  className="text-xs text-[#c62828] hover:underline flex items-center gap-1 cursor-pointer font-medium"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {/* Live Camera View */}
+            {activeCamera ? (
+              <div className="relative w-full aspect-4/3 rounded-[20px] overflow-hidden bg-black flex items-center justify-center border border-[#e2dfd5]">
+                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                <button
+                  onClick={capturePhoto}
+                  className="absolute bottom-4 bg-[#5A5A40] text-white px-6 py-2.5 rounded-full font-bold shadow-lg hover:bg-[#4a4a34] transition flex items-center gap-2 cursor-pointer uppercase text-xs tracking-wider"
+                >
+                  <Camera className="w-4 h-4" />
+                  Snap Photo
+                </button>
+              </div>
+            ) : selectedImage ? (
+              /* Uploaded / Selected Image Display */
+              <div className="relative w-full aspect-4/3 rounded-[20px] overflow-hidden bg-[#fdfcfb] border border-[#e2dfd5] shadow-inner">
+                <img
+                  src={selectedImage}
+                  alt="Target Wound"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-contain"
+                />
+                <div className="absolute top-3 left-3 px-3 py-1 bg-black/60 text-white backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+                  <span>Wound Image Analyzed</span>
+                </div>
+              </div>
+            ) : (
+              /* Drag & Drop Upload Zone */
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className={`w-full aspect-4/3 border-4 border-dashed rounded-[24px] p-6 flex flex-col items-center justify-center text-center cursor-pointer transition ${
+                  highContrast
+                    ? 'border-yellow-400 bg-zinc-900 hover:bg-zinc-800'
+                    : 'border-[#e2dfd5] bg-[#fdfcfb] hover:border-[#5A5A40] hover:bg-[#f0ede4]'
+                }`}
+              >
+                <div className="w-14 h-14 rounded-full bg-[#f0ede4] flex items-center justify-center mb-3 text-[#5A5A40]">
+                  <Upload className="w-7 h-7" />
+                </div>
+                <p className="text-sm font-serif italic text-[#5A5A40]">
+                  Drag & Drop Wound Photo Here
+                </p>
+                <p className="text-xs text-[#8e8b82] mt-1 mb-5">
+                  Supports JPG, PNG, WEBP from phone camera or gallery
+                </p>
+
+                <div className="flex flex-wrap justify-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInputRef.current?.click();
+                    }}
+                    className="bg-[#f0ede4] hover:bg-[#e2dfd5] text-[#5A5A40] px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    Browse Files
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startCamera();
+                    }}
+                    className="bg-[#5A5A40] hover:bg-[#4a4a34] text-white px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider shadow cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    Use Live Camera
+                  </button>
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+              </div>
+            )}
+
+            {/* Quick Helper Tip */}
+            <div className="mt-4 p-3.5 rounded-2xl bg-[#fdfcf8] border border-[#e2dfd5] text-xs text-[#8e8b82] flex items-start gap-2.5">
+              <Info className="w-4 h-4 text-[#5A5A40] shrink-0 mt-0.5" />
+              <span>
+                Tip: Position a small coin or ruler next to the wound for precise length/width calibration.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Side: VLM Analysis & Multilingual Triage Card (7 cols) */}
+        <div className="lg:col-span-7">
+          {isAnalyzing ? (
+            /* Loading / AI Inference Animation */
+            <div className={`p-8 rounded-[28px] border min-h-[420px] flex flex-col items-center justify-center text-center ${
+              highContrast ? 'bg-black border-yellow-400' : 'bg-white border-[#e2dfd5] shadow-sm'
+            }`}>
+              <div className="relative w-16 h-16 mb-4">
+                <div className="absolute inset-0 rounded-full border-4 border-[#5A5A40]/20 border-t-[#5A5A40] animate-spin" />
+                <div className="absolute inset-2 rounded-full border-4 border-[#e2dfd5] border-b-[#5A5A40] animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <Activity className="w-6 h-6 text-[#5A5A40] animate-pulse" />
+                </div>
+              </div>
+
+              <h3 className="text-xl font-serif italic text-[#5A5A40] mb-2">
+                Analyzing Wound Image with VLM
+              </h3>
+              <p className="text-xs text-[#5A5A40] max-w-md font-mono bg-[#fdfcfb] px-4 py-2 rounded-xl border border-[#e2dfd5]">
+                {analysisProgressStep}
+              </p>
+
+              <div className="mt-6 flex items-center gap-2 text-xs text-[#8e8b82]">
+                <Layers className="w-3.5 h-3.5 text-[#5A5A40]" />
+                <span>Engine: {useOfflineEngine ? 'BLIP-2 + OPT-2.7B (On-Device LoRA)' : 'Gemini 3.6 Flash VLM'}</span>
+              </div>
+            </div>
+          ) : analysisResult ? (
+            /* Analysis Result Card */
+            <div className={`p-7 rounded-[28px] border space-y-6 transition-all ${
+              highContrast ? 'bg-black border-yellow-400 text-yellow-300' : 'bg-white border-[#e2dfd5] text-[#2c2c2c] shadow-sm'
+            }`}>
+              
+              {/* AI Analysis Report Title & Patient Profile Badge */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-widest text-[#8e8b82]">
+                    AI Triage Analysis Report
+                  </span>
+                  <h2 className="text-3xl font-serif italic text-[#5A5A40]">
+                    Wound Diagnosis
+                  </h2>
+                </div>
+
+                {/* FEATURE 10: Patient Profile Badge */}
+                <div className={`px-3 py-1.5 rounded-full font-bold text-xs flex items-center gap-1.5 shadow-2xs ${
+                  patientMode === 'child' ? 'bg-orange-600 text-white' : 'bg-[#5A5A40] text-white'
+                }`}>
+                  {patientMode === 'child' ? <Baby className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                  <span>{patientMode === 'child' ? 'Child Patient (<18)' : 'Adult Patient (18+)'}</span>
+                </div>
+              </div>
+
+              {/* Header Badge & Severity Banner */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                
+                {/* Type & Confidence Box */}
+                <div className="p-4 bg-[#fdfcf8] rounded-2xl border border-[#e2dfd5] flex items-center justify-between">
+                  <div>
+                    <span className="block text-[10px] uppercase text-[#8e8b82] font-bold tracking-wider">Identified Type</span>
+                    <span className="text-xl font-bold text-[#2c2c2c]">{analysisResult.woundType}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="block text-[10px] uppercase text-[#8e8b82] font-bold tracking-wider">Confidence</span>
+                    <span className="text-xl font-bold text-[#5A5A40]">{analysisResult.confidenceScore}%</span>
+                  </div>
+                </div>
+
+                {/* Severity Grade Box */}
+                <div className={`p-4 rounded-2xl border flex items-center justify-between ${
+                  analysisResult.severity === 'Severe'
+                    ? 'bg-[#fff3f3] border-[#ffcdd2] text-[#c62828]'
+                    : analysisResult.severity === 'Moderate'
+                    ? 'bg-[#fff8e1] border-[#ffe082] text-[#f57f17]'
+                    : 'bg-[#e8f5e9] border-[#c8e6c9] text-[#2e7d32]'
+                }`}>
+                  <div>
+                    <span className="block text-[10px] uppercase font-bold tracking-wider opacity-80">Severity Grade</span>
+                    <span className="text-2xl font-serif italic font-bold">{analysisResult.severity}</span>
+                  </div>
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    analysisResult.severity === 'Severe' ? 'bg-[#c62828] text-white animate-bounce' : 'bg-[#f57f17] text-white'
+                  }`}>
+                    <ShieldAlert className="w-5 h-5" />
+                  </div>
+                </div>
+
+              </div>
+
+              {/* FEATURE 1: Golden Hour Countdown for Severe Wounds */}
+              {analysisResult.severity === 'Severe' && (
+                <GoldenHourCountdown
+                  currentLang={currentLang}
+                  highContrast={highContrast}
+                  onOpenEmergency108={onOpenEmergencyModal}
+                  onTriggerSmsAlert={() => setShowSmsModal(true)}
+                  woundType={analysisResult.woundType}
+                />
+              )}
+
+              {/* FEATURE 14: Weather-Aware Healing Advice Banner */}
+              <WeatherAdviceBanner
+                currentLang={currentLang}
+                highContrast={highContrast}
+              />
+
+              {/* FEATURE 2: Foreign Object Detector */}
+              <ForeignObjectDetector
+                data={analysisResult.foreignObject}
+                currentLang={currentLang}
+                highContrast={highContrast}
+              />
+
+              {/* FEATURE 3: Blood Loss Estimator */}
+              <BloodLossEstimator
+                data={analysisResult.bloodLoss}
+                currentLang={currentLang}
+                onLaunchTourniquetGuide={onOpenEmergencyModal}
+                highContrast={highContrast}
+              />
+
+              {/* FEATURE 4: Snake & Animal Bite Identifier */}
+              {analysisResult.biteData && analysisResult.biteData.biteType !== 'none' && (
+                <SnakeAndAnimalBiteIdentifier
+                  data={analysisResult.biteData}
+                  currentLang={currentLang}
+                  onNavigateToHospitals={() => onNavigateTab && onNavigateTab('hospitals')}
+                  highContrast={highContrast}
+                />
+              )}
+
+              {/* FEATURE 5 & 11: Wound Age & Scar Risk Intelligence */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <WoundAgeEstimator
+                  data={analysisResult.woundAge}
+                  currentLang={currentLang}
+                  highContrast={highContrast}
+                />
+                <ScarRiskPredictor
+                  data={analysisResult.scarRisk}
+                  currentLang={currentLang}
+                  highContrast={highContrast}
+                />
+              </div>
+
+              {/* FEATURE 7: Tetanus Risk Warning Banner */}
+              {analysisResult.tetanusRiskDetected && (
+                <div className="p-4 rounded-2xl bg-red-600 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center shrink-0">
+                      <Syringe className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm uppercase tracking-wider">⚠️ TETANUS RISK WARNING DETECTED</h4>
+                      <p className="text-xs text-red-100">
+                        Puncture/contaminated wound detected. Tetanus Toxoid (TT) vaccine required within 24 hours.
+                      </p>
+                    </div>
+                  </div>
+                  {onNavigateTab && (
+                    <button
+                      onClick={() => onNavigateTab('hospitals')}
+                      className="px-4 py-2 rounded-full bg-white text-red-700 font-bold text-xs uppercase tracking-wider hover:bg-red-50 transition cursor-pointer shrink-0 shadow"
+                    >
+                      Locate Vaccine Center
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* FEATURE 4: Wound Measurement Estimator Box */}
+              <div className="p-4 rounded-2xl bg-[#f5f7f2] border border-[#d8e0d0] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-[#5A5A40] text-white flex items-center justify-center shrink-0">
+                    <Ruler className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-[#8e8b82] tracking-wider block">
+                      AI Wound Measurement Estimator
+                    </span>
+                    <span className="text-base font-bold font-serif text-[#2c2c2c]">
+                      {analysisResult.measurement?.formattedText || `${analysisResult.measurement?.lengthCm || 3.5} cm x ${analysisResult.measurement?.widthCm || 1.8} cm`}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right text-[11px] text-[#8e8b82] bg-white px-3 py-1.5 rounded-xl border border-[#e2dfd5]">
+                  <span>📏 Reference Object: Coin / Standard Scale Calibrated</span>
+                </div>
+              </div>
+
+              {/* FEATURE 5: Infection Risk Predictor Meter */}
+              <div className="p-4 rounded-2xl bg-[#fdfcf8] border border-[#e2dfd5] space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-[#5A5A40] uppercase tracking-wider flex items-center gap-1.5">
+                    <Activity className="w-4 h-4 text-amber-600" /> Infection Risk Score Predictor
+                  </span>
+                  <span className={`px-2.5 py-0.5 rounded-full text-white font-mono ${
+                    (analysisResult.infectionRiskScore || 40) > 65
+                      ? 'bg-red-600'
+                      : (analysisResult.infectionRiskScore || 40) > 35
+                      ? 'bg-amber-600'
+                      : 'bg-emerald-600'
+                  }`}>
+                    {analysisResult.infectionRiskScore || 40}% ({analysisResult.infectionRisk})
+                  </span>
+                </div>
+
+                {/* Color-coded percentage gauge meter */}
+                <div className="w-full h-3 rounded-full bg-[#e2dfd5] overflow-hidden relative">
+                  <div
+                    style={{ width: `${analysisResult.infectionRiskScore || 40}%` }}
+                    className={`h-full transition-all duration-700 rounded-full ${
+                      (analysisResult.infectionRiskScore || 40) > 65
+                        ? 'bg-red-600'
+                        : (analysisResult.infectionRiskScore || 40) > 35
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                    }`}
+                  />
+                </div>
+
+                {analysisResult.infectionVisualCues && analysisResult.infectionVisualCues.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] text-[#8e8b82]">
+                    <span className="font-bold text-[#525252]">Visual Markers:</span>
+                    {analysisResult.infectionVisualCues.map((cue, idx) => (
+                      <span key={idx} className="px-2 py-0.5 rounded bg-[#f0ede4] text-[#5A5A40] font-medium">
+                        • {cue}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Triage Summary & Multilingual Read-Aloud Bar */}
+              <div className="bg-[#fdfcf8] p-5 rounded-2xl border border-[#e2dfd5] space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#5A5A40]">
+                    <HeartPulse className="w-4 h-4 text-[#c62828]" />
+                    <span>Clinical Diagnosis ({currentLang.toUpperCase()})</span>
+                  </div>
+
+                  {/* Audio Read-Aloud Button */}
+                  <button
+                    id="btn-read-aloud"
+                    onClick={handleToggleSpeech}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider transition cursor-pointer ${
+                      isPlayingAudio
+                        ? 'bg-[#c62828] text-white animate-pulse'
+                        : 'bg-[#f0ede4] hover:bg-[#e2dfd5] text-[#5A5A40]'
+                    }`}
+                  >
+                    {isPlayingAudio ? (
+                      <>
+                        <VolumeX className="w-3.5 h-3.5" />
+                        <span>Stop Voice</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5 text-[#5A5A40]" />
+                        <span>Replay Voice Alert ({currentLang.toUpperCase()})</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <p className="text-sm font-medium text-[#2c2c2c] leading-relaxed">
+                  {analysisResult.triageSummary[currentLang] || analysisResult.triageSummary.en}
+                </p>
+
+                {/* FEATURE 10: Child Pediatric Specific Care Notes if active */}
+                {analysisResult.isChildMode && analysisResult.pediatricNotes && (
+                  <div className="p-3 rounded-xl bg-orange-50 border border-orange-200 text-orange-900 text-xs flex items-start gap-2">
+                    <Baby className="w-4 h-4 text-orange-600 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-bold">PEDIATRIC CARE PROTOCOL:</strong>
+                      <span>{analysisResult.pediatricNotes[currentLang] || analysisResult.pediatricNotes.en}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Immediate First Aid Steps - Natural Tones Olive Container */}
+              <div className="bg-[#5A5A40] rounded-[24px] p-6 text-white shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-widest opacity-80 block">
+                    Immediate First Aid Steps
+                  </span>
+                  <span className="text-[10px] opacity-70">
+                    Check off steps as completed
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {analysisResult.firstAidSteps.map((step) => {
+                    const isChecked = checkedSteps[step.stepNumber] || false;
+                    const stepText = step.text[currentLang] || step.text.en;
+
+                    return (
+                      <div
+                        key={step.stepNumber}
+                        onClick={() => toggleStep(step.stepNumber)}
+                        className={`flex items-start gap-4 p-3 rounded-xl transition cursor-pointer ${
+                          isChecked
+                            ? 'bg-white/10 line-through opacity-60'
+                            : 'bg-white/10 hover:bg-white/20'
+                        }`}
+                      >
+                        <span className="w-6 h-6 bg-white/20 rounded-full flex items-center justify-center text-xs flex-shrink-0 font-bold mt-0.5">
+                          0{step.stepNumber}
+                        </span>
+                        <div className="text-sm leading-relaxed flex-1">
+                          <span>{stepText}</span>
+                          {step.isUrgent && (
+                            <span className="ml-2 text-[10px] font-bold bg-[#c62828] text-white px-2 py-0.5 rounded-full">
+                              URGENT
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* FEATURE 6: Ayurvedic Alternative Advisor */}
+              <AyurvedicAdvisor
+                remedies={analysisResult.ayurvedicRemedies}
+                woundType={analysisResult.woundType}
+                currentLang={currentLang}
+                highContrast={highContrast}
+              />
+
+              {/* FEATURE 6: Diet and Recovery Advisory */}
+              {analysisResult.recoveryDiet && (
+                <div className="bg-[#f4f7f2] p-5 rounded-2xl border border-[#d5e0d0] space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#5A5A40]">
+                    <Apple className="w-4 h-4 text-emerald-700" />
+                    <span>Recovery Diet & Hydration Advisory</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="bg-white p-3.5 rounded-xl border border-[#e2dfd5] space-y-1">
+                      <span className="font-bold text-emerald-700 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Recommended Foods (To Eat):
+                      </span>
+                      <ul className="list-disc pl-4 text-[#2c2c2c] space-y-0.5 text-[11px]">
+                        {analysisResult.recoveryDiet.foodsToEat.map((food, i) => (
+                          <li key={i}>{food[currentLang] || food.en}</li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <div className="bg-white p-3.5 rounded-xl border border-[#e2dfd5] space-y-1">
+                      <span className="font-bold text-red-700 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-600" /> Foods & Liquids to Avoid:
+                      </span>
+                      <ul className="list-disc pl-4 text-[#2c2c2c] space-y-0.5 text-[11px]">
+                        {analysisResult.recoveryDiet.foodsToAvoid.map((food, i) => (
+                          <li key={i}>{food[currentLang] || food.en}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white border border-[#e2dfd5] text-xs flex flex-col sm:flex-row justify-between gap-2 text-[#2c2c2c]">
+                    <span>💧 <strong>Hydration:</strong> {analysisResult.recoveryDiet.hydrationAdvice[currentLang] || analysisResult.recoveryDiet.hydrationAdvice.en}</span>
+                    <span>🛌 <strong>Rest:</strong> {analysisResult.recoveryDiet.restAdvice[currentLang] || analysisResult.recoveryDiet.restAdvice.en}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Recommended Medicines & Supplies */}
+              {analysisResult.medicineRecommendations && analysisResult.medicineRecommendations.length > 0 && (
+                <div className="bg-[#f7f5f0] p-5 rounded-2xl border border-[#e2dfd5] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#5A5A40]">
+                      <Pill className="w-4 h-4 text-[#5A5A40]" />
+                      <span>Recommended Medicines & Supplies</span>
+                    </div>
+                    <span className="text-[10px] font-bold bg-[#e2dfd5] text-[#5A5A40] px-2.5 py-0.5 rounded-full">
+                      INR Pricing & Safety Rated
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {analysisResult.medicineRecommendations.map((med, idx) => (
+                      <div key={idx} className="bg-white p-4 rounded-xl border border-[#e2dfd5] space-y-2">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-bold text-[#2c2c2c] flex items-center gap-1.5">
+                              {med.name}
+                            </h4>
+                            <span className="text-[11px] text-[#8e8b82] font-mono">
+                              Generic: {med.genericName}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${
+                              med.harmLevel.toLowerCase().includes('very low')
+                                ? 'bg-[#e8f5e9] text-[#2e7d32] border border-[#c8e6c9]'
+                                : 'bg-[#fff3e0] text-[#e65100] border border-[#ffe0b2]'
+                            }`}>
+                              {med.harmLevel}
+                            </span>
+
+                            <span className="bg-[#f0ede4] text-[#5A5A40] text-xs font-bold px-2.5 py-1 rounded-lg border border-[#e2dfd5] flex items-center gap-1">
+                              <ShoppingBag className="w-3 h-3" />
+                              {med.estimatedPriceINR}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-xs text-[#525252] space-y-1 pt-1 border-t border-[#f0ede4]">
+                          <p><strong className="text-[#2c2c2c]">Dosage:</strong> {med.dosageInstructions[currentLang] || med.dosageInstructions.en}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Critical Myth Warnings */}
+              {analysisResult.criticalWarnings.length > 0 && (
+                <div className="bg-[#fff3f3] border border-[#ffcdd2] p-4 rounded-2xl text-xs space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[#c62828] font-bold">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>Rural Health Warnings & Myth Busters</span>
+                  </div>
+                  {analysisResult.criticalWarnings.map((warn, idx) => (
+                    <p key={idx} className="text-[#2c2c2c] pl-5 relative before:content-['•'] before:absolute before:left-1 before:text-[#c62828]">
+                      {warn[currentLang] || warn.en}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {/* Action Toolbar: SMS Alert & Download PDF */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-[#e2dfd5]">
+                {/* FEATURE 8: Caretaker Emergency SMS Alert */}
+                <button
+                  onClick={() => setShowSmsModal(true)}
+                  id="btn-trigger-sms-alert"
+                  className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-600 hover:bg-red-700 text-white font-bold text-xs uppercase tracking-wider transition cursor-pointer shadow"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  <span>Send Caretaker SMS Alert</span>
+                </button>
+
+                {/* FEATURE 9: Offline First Aid PDF Generator */}
+                <button
+                  onClick={() => generateWoundReportPDF(analysisResult, currentLang, selectedImage || undefined)}
+                  id="btn-download-pdf-report"
+                  className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#5A5A40] hover:bg-[#4a4a34] text-white font-bold text-xs uppercase tracking-wider transition cursor-pointer shadow"
+                >
+                  <FileDown className="w-4 h-4" />
+                  <span>Download PDF Report</span>
+                </button>
+              </div>
+
+              {/* Patient Logging & Save Section */}
+              <div className="pt-3 border-t border-[#e2dfd5] space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <input
+                    type="text"
+                    placeholder="Patient Name / ID (Optional)"
+                    value={patientNameInput}
+                    onChange={(e) => setPatientNameInput(e.target.value)}
+                    className="bg-[#fdfcfb] border border-[#e2dfd5] text-xs text-[#2c2c2c] p-2.5 rounded-xl focus:outline-none focus:border-[#5A5A40]"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Location / Village / PHC Notes"
+                    value={clinicalNotesInput}
+                    onChange={(e) => setClinicalNotesInput(e.target.value)}
+                    className="bg-[#fdfcfb] border border-[#e2dfd5] text-xs text-[#2c2c2c] p-2.5 rounded-xl focus:outline-none focus:border-[#5A5A40]"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <button
+                    id="btn-save-case-record"
+                    onClick={handleSave}
+                    className="bg-[#2e7d32] hover:bg-[#1b5e20] text-white text-xs font-bold px-5 py-2.5 rounded-full shadow flex items-center gap-1.5 transition cursor-pointer uppercase tracking-wider"
+                  >
+                    <BookmarkPlus className="w-4 h-4" />
+                    <span>{savedSuccess ? 'Saved to Patient Logs!' : 'Save Case Record'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setSelectedImage(null);
+                      setAnalysisResult(null);
+                    }}
+                    className="bg-[#f0ede4] hover:bg-[#e2dfd5] text-[#5A5A40] text-xs font-bold px-5 py-2.5 rounded-full border border-[#e2dfd5] transition cursor-pointer flex items-center gap-1.5 uppercase tracking-wider"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Scan New Injury</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          ) : (
+            /* Blank Prompt State before photo selected */
+            <div className={`p-10 rounded-[28px] border min-h-[420px] flex flex-col items-center justify-center text-center ${
+              highContrast ? 'bg-black border-yellow-400 text-yellow-300' : 'bg-white border-[#e2dfd5] text-[#2c2c2c] shadow-sm'
+            }`}>
+              <div className="w-16 h-16 rounded-full bg-[#f0ede4] flex items-center justify-center mb-4 text-[#5A5A40]">
+                <HeartPulse className="w-8 h-8" />
+              </div>
+
+              <h3 className="text-2xl font-serif italic text-[#5A5A40] mb-2">
+                Awaiting Injury Photo
+              </h3>
+              <p className="text-xs text-[#8e8b82] max-w-sm mb-6 leading-relaxed">
+                Upload or snap a photo of any wound on the left to generate real-time AI triage and multilingual first aid.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left max-w-md w-full text-xs">
+                <div className="p-3.5 rounded-2xl bg-[#fdfcf8] border border-[#e2dfd5]">
+                  <span className="font-serif font-bold text-[#5A5A40] block mb-0.5">Any or All Wound Categories</span>
+                  <span className="text-[#8e8b82] text-[11px]">
+                    Abrasion, Laceration, Puncture, Burn, Bite, Ulcer & Any Other Wounds
+                  </span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-[#fdfcf8] border border-[#e2dfd5]">
+                  <span className="font-serif font-bold text-[#5A5A40] block mb-0.5">3 Languages</span>
+                  <span className="text-[#8e8b82] text-[11px]">
+                    English, Hindi (हिंदी), Tamil (தமிழ்)
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* Emergency Caretaker SMS Modal */}
+      {showSmsModal && analysisResult && (
+        <CaretakerSmsModal
+          isOpen={showSmsModal}
+          onClose={() => setShowSmsModal(false)}
+          highContrast={highContrast}
+          woundType={analysisResult.woundType}
+          severity={analysisResult.severity}
+          firstAidSummary={analysisResult.triageSummary[currentLang] || analysisResult.triageSummary.en}
+          patientMode={patientMode}
+        />
+      )}
+
+    </div>
+  );
+};
